@@ -6,7 +6,8 @@
 <meta name="theme-color" content="#0f0d0a"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-<link rel="manifest" href="data:application/json,{&quot;name&quot;:&quot;EPUB Forge&quot;,&quot;short_name&quot;:&quot;Forge&quot;,&quot;start_url&quot;:&quot;.&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;%230f0d0a&quot;,&quot;theme_color&quot;:&quot;%230f0d0a&quot;}"/>
+<link rel="manifest" href="manifest.webmanifest"/>
+<link rel="apple-touch-icon" href="icon-192.png"/>
 <title>EPUB Forge</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
@@ -404,6 +405,66 @@
   .tag.red    { background: rgba(192,57,43,0.12); color: #e88; border-color: rgba(192,57,43,0.25); }
 
   .kbd { display: inline-block; font-family: var(--mono); font-size: .75rem; background: var(--spine); color: var(--cream); padding: .1rem .4rem; border-radius: 3px; border: 1px solid rgba(255,255,255,0.1); }
+
+  .install-banner {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: .85rem;
+    padding: .8rem 1rem;
+    margin-bottom: 1rem;
+    border: 1px solid rgba(200,168,75,0.3);
+    background: linear-gradient(135deg, rgba(200,168,75,0.15), rgba(200,168,75,0.04));
+    border-radius: var(--radius);
+  }
+  .install-banner.visible { display: flex; }
+  .install-copy { font-size: .86rem; color: var(--cream); }
+  .install-copy strong { color: var(--gilt2); font-family: var(--display); letter-spacing: .02em; }
+  .btn-install {
+    border: 1px solid rgba(200,168,75,0.45);
+    background: rgba(200,168,75,0.12);
+    color: var(--gilt2);
+    font-family: var(--mono);
+    font-size: .74rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    border-radius: 4px;
+    padding: .45rem .7rem;
+    cursor: pointer;
+    transition: all .2s ease;
+    white-space: nowrap;
+  }
+  .btn-install:hover { background: rgba(200,168,75,0.22); box-shadow: var(--glow); }
+
+  .site-footer {
+    margin: 1rem auto 2rem;
+    max-width: 680px;
+    padding: 0 1rem;
+  }
+  .footer-inner {
+    border-top: 1px solid var(--spine);
+    padding-top: 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: .7rem;
+    color: var(--muted);
+    font-size: .84rem;
+  }
+  .footer-links {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: .75rem;
+  }
+  .footer-links a {
+    color: var(--gilt);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+  }
+  .footer-links a:hover { border-bottom-color: rgba(200,168,75,0.65); }
+
 </style>
 </head>
 <body>
@@ -418,6 +479,10 @@
 </header>
 
 <main>
+  <div class="install-banner" id="installBanner">
+    <div class="install-copy"><strong>Install EPUB Forge</strong><br/>Use it like a native app with offline support.</div>
+    <button class="btn-install" id="installBtn" type="button">Install App</button>
+  </div>
 
   <!-- Step 1: Folder -->
   <div class="card" id="card-folder">
@@ -556,6 +621,17 @@
   </button>
 
 </main>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-links">
+      <span>About the developer:</span>
+      <a href="https://github.com" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="mailto:hello@example.com">Contact Dev</a>
+    </div>
+    <div id="copyrightLine">© 2026 All Rights Reserved.</div>
+  </div>
+</footer>
 
 <!-- ── Help Modal ── -->
 <div class="modal-backdrop" id="helpBackdrop" onclick="closeHelpOutside(event)">
@@ -872,6 +948,9 @@ hr { border: none; border-top: 2px solid #111; margin: 2em 0; width: 4em; }`,
 // ──────────────────────────────────────────────
 document.getElementById('metaDate').value = new Date().toISOString().split('T')[0];
 document.getElementById('cssContent').value = CSS_PRESETS.kindle;
+const currentYear = new Date().getFullYear();
+document.getElementById('metaRights').placeholder = `© 2026-${currentYear} Your Name. All rights reserved.`;
+document.getElementById('copyrightLine').textContent = `© 2026-${currentYear} All Rights Reserved.`;
 
 document.getElementById('optCSS').addEventListener('change', e => {
   document.getElementById('cssEditor').classList.toggle('open', e.target.checked);
@@ -1175,17 +1254,56 @@ dz.addEventListener('drop', e => {
 });
 
 // ──────────────────────────────────────────────
-// PWA service worker (inline)
+// PWA install + service worker + background sync
 // ──────────────────────────────────────────────
+let deferredInstallPrompt = null;
+const installBanner = document.getElementById('installBanner');
+const installBtn = document.getElementById('installBtn');
+
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  installBanner.classList.add('visible');
+});
+
+installBtn.addEventListener('click', async () => {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt = null;
+  installBanner.classList.remove('visible');
+});
+
+window.addEventListener('appinstalled', () => {
+  installBanner.classList.remove('visible');
+  log('EPUB Forge installed on this device', 'ok');
+});
+
+async function registerRefreshSync(registration) {
+  if (!('sync' in registration)) return;
+  try {
+    await registration.sync.register('epub-forge-refresh');
+  } catch {
+    // Fallback to immediate message if background sync isn't available.
+    if (registration.active) registration.active.postMessage('refresh-cache');
+  }
+}
+
 if ('serviceWorker' in navigator) {
-  const sw = `
-    const CACHE = 'epub-forge-v1';
-    const ASSETS = [self.location.href];
-    self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS))));
-    self.addEventListener('fetch', e => e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))));
-  `;
-  const blob = new Blob([sw], { type: 'application/javascript' });
-  navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(() => {});
+  window.addEventListener('load', async () => {
+    try {
+      const registration = await navigator.serviceWorker.register('./sw.js');
+      await registerRefreshSync(registration);
+
+      window.addEventListener('online', () => registerRefreshSync(registration));
+
+      if (registration.waiting) {
+        log('An app update is ready. Close and reopen to apply.', 'info');
+      }
+    } catch (error) {
+      console.error('Service worker registration failed', error);
+    }
+  });
 }
 </script>
 </body>

@@ -1,3 +1,7 @@
+<div align="center">
+
+<img src="icon-512.png" width="100" height="100" alt="Billz Icon"/>
+
 # ✨ EPUB Forge
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-gold.svg)
@@ -8,6 +12,8 @@
 ![No Backend](https://img.shields.io/badge/Backend-None-64748b.svg)
 
 A polished, mobile-friendly web app for turning structured manuscript folders into Kindle-ready `.epub` files — completely in-browser.
+
+</div>
 
 ---
 

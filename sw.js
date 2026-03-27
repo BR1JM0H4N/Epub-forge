@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v4.1';
+const CACHE_VERSION = 'v4.2';
 const STATIC_CACHE = `epub-forge-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `epub-forge-runtime-${CACHE_VERSION}`;
 

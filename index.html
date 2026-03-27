@@ -1,0 +1,1192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="theme-color" content="#0f0d0a"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<link rel="manifest" href="data:application/json,{&quot;name&quot;:&quot;EPUB Forge&quot;,&quot;short_name&quot;:&quot;Forge&quot;,&quot;start_url&quot;:&quot;.&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;%230f0d0a&quot;,&quot;theme_color&quot;:&quot;%230f0d0a&quot;}"/>
+<title>EPUB Forge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/epubit@1.0.5/epubit.js"></script>
+<style>
+  :root {
+    --ink:    #0f0d0a;
+    --paper:  #1a1713;
+    --leaf:   #221f1a;
+    --spine:  #2e2a23;
+    --gilt:   #c8a84b;
+    --gilt2:  #e6c96a;
+    --cream:  #f2e8d0;
+    --muted:  #7a6e5c;
+    --red:    #c0392b;
+    --mono:   'JetBrains Mono', monospace;
+    --serif:  'Crimson Pro', Georgia, serif;
+    --display:'Playfair Display', Georgia, serif;
+    --radius: 6px;
+    --glow:   0 0 24px rgba(200,168,75,0.15);
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--ink);
+    color: var(--cream);
+    font-family: var(--serif);
+    font-size: 16px;
+    line-height: 1.6;
+    min-height: 100dvh;
+    overflow-x: hidden;
+  }
+
+  /* ── Grain overlay ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none; z-index: 9999; opacity: .5;
+  }
+
+  /* ── Header ── */
+  header {
+    padding: 2rem 1.5rem 1.5rem;
+    border-bottom: 1px solid rgba(200,168,75,0.2);
+    display: flex; align-items: center; gap: 1rem;
+    background: linear-gradient(180deg, rgba(200,168,75,0.06) 0%, transparent 100%);
+  }
+  .logo-mark {
+    width: 44px; height: 44px; flex-shrink: 0;
+    background: var(--gilt);
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--display); font-size: 1.3rem; color: var(--ink); font-weight: 700;
+    animation: pulse 4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(200,168,75,0)} 50%{box-shadow:0 0 20px 4px rgba(200,168,75,0.3)} }
+  header h1 { font-family: var(--display); font-size: 1.6rem; font-weight: 600; letter-spacing: .02em; }
+  header p  { font-size: .85rem; color: var(--muted); font-family: var(--serif); font-style: italic; }
+  .btn-help {
+    margin-left: auto; flex-shrink: 0;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: transparent; border: 1.5px solid rgba(200,168,75,0.35);
+    color: var(--gilt); font-family: var(--display); font-size: 1rem; font-weight: 700;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all .25s;
+  }
+  .btn-help:hover { background: rgba(200,168,75,0.12); border-color: var(--gilt); box-shadow: 0 0 12px rgba(200,168,75,0.2); transform: scale(1.08); }
+
+  /* ── Main layout ── */
+  main { max-width: 680px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+
+  /* ── Section cards ── */
+  .card {
+    background: var(--paper);
+    border: 1px solid var(--spine);
+    border-radius: var(--radius);
+    margin-bottom: 1.25rem;
+    overflow: hidden;
+    transition: border-color .3s;
+  }
+  .card:focus-within { border-color: rgba(200,168,75,0.4); box-shadow: var(--glow); }
+
+  .card-header {
+    padding: .75rem 1.1rem;
+    background: var(--leaf);
+    border-bottom: 1px solid var(--spine);
+    display: flex; align-items: center; gap: .6rem;
+  }
+  .card-header .icon { color: var(--gilt); font-size: 1rem; width: 1.2rem; text-align: center; }
+  .card-header h2 { font-family: var(--display); font-size: .95rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+  .card-header .badge {
+    margin-left: auto; font-family: var(--mono); font-size: .7rem;
+    background: rgba(200,168,75,0.15); color: var(--gilt);
+    padding: .15rem .5rem; border-radius: 3px; border: 1px solid rgba(200,168,75,0.3);
+  }
+  .card-body { padding: 1.1rem; }
+
+  /* ── Drop zone ── */
+  .dropzone {
+    border: 2px dashed var(--spine);
+    border-radius: var(--radius);
+    padding: 2.5rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all .3s;
+    position: relative;
+    overflow: hidden;
+  }
+  .dropzone:hover, .dropzone.drag { border-color: var(--gilt); background: rgba(200,168,75,0.04); }
+  .dropzone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .dropzone .dz-icon { font-size: 2.5rem; display: block; margin-bottom: .75rem; }
+  .dropzone h3 { font-family: var(--display); font-size: 1.2rem; margin-bottom: .35rem; }
+  .dropzone p  { color: var(--muted); font-size: .88rem; }
+  .dropzone .gilt { color: var(--gilt); }
+
+  /* ── Scan result ── */
+  .scan-result { display: none; }
+  .scan-result.visible { display: block; }
+
+  .file-grid { display: grid; gap: .5rem; }
+
+  .file-item {
+    display: flex; align-items: center; gap: .7rem;
+    padding: .5rem .7rem;
+    background: var(--leaf);
+    border-radius: 4px;
+    border: 1px solid var(--spine);
+    font-size: .85rem;
+    animation: slideIn .25s ease forwards;
+    opacity: 0;
+  }
+  @keyframes slideIn { to { opacity: 1; transform: translateY(0); } from { opacity: 0; transform: translateY(6px); } }
+
+  .file-item .fi-type { 
+    font-size: .7rem; font-family: var(--mono); 
+    background: rgba(200,168,75,0.12); color: var(--gilt);
+    padding: .1rem .35rem; border-radius: 3px; flex-shrink: 0;
+    min-width: 52px; text-align: center; border: 1px solid rgba(200,168,75,0.25);
+  }
+  .file-item .fi-name { flex: 1; color: var(--cream); font-family: var(--serif); }
+  .file-item .fi-order { color: var(--muted); font-family: var(--mono); font-size: .75rem; }
+  .fi-type.cover   { background: rgba(192,57,43,0.15); color: #e88; border-color: rgba(192,57,43,0.3); }
+  .fi-type.chapter { background: rgba(200,168,75,0.12); color: var(--gilt); }
+  .fi-type.image   { background: rgba(80,160,100,0.15); color: #8dc; border-color: rgba(80,160,100,0.3); }
+
+  .cover-preview {
+    width: 100%; max-height: 180px; object-fit: contain;
+    border-radius: 4px; border: 1px solid var(--spine);
+    margin-bottom: .75rem;
+    background: var(--ink);
+  }
+
+  /* ── Form fields ── */
+  .form-grid { display: grid; gap: .85rem; }
+  .form-row  { display: grid; grid-template-columns: 1fr 1fr; gap: .85rem; }
+
+  label { display: block; font-size: .78rem; font-family: var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: .3rem; }
+
+  input[type=text], input[type=date], select, textarea {
+    width: 100%; background: var(--leaf);
+    border: 1px solid var(--spine); border-radius: 4px;
+    padding: .6rem .8rem; color: var(--cream);
+    font-family: var(--serif); font-size: .95rem;
+    outline: none; transition: border-color .2s, box-shadow .2s;
+    appearance: none;
+  }
+  input:focus, select:focus, textarea:focus {
+    border-color: rgba(200,168,75,0.5);
+    box-shadow: 0 0 0 3px rgba(200,168,75,0.08);
+  }
+  textarea { resize: vertical; min-height: 70px; }
+  select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M0 0l6 8 6-8z' fill='%237a6e5c'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right .8rem center; padding-right: 2rem; }
+  ::placeholder { color: var(--muted); opacity: .7; }
+
+  /* ── Toggle row ── */
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: .5rem 0; border-bottom: 1px solid var(--spine); }
+  .toggle-row:last-child { border-bottom: none; }
+  .toggle-label { font-size: .9rem; }
+  .toggle-label span { display: block; font-size: .78rem; color: var(--muted); }
+
+  .toggle { position: relative; width: 42px; height: 24px; flex-shrink: 0; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-track {
+    position: absolute; inset: 0; background: var(--spine); border-radius: 12px; cursor: pointer; transition: background .3s;
+  }
+  .toggle-track::before {
+    content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px;
+    background: var(--muted); border-radius: 50%; transition: transform .3s, background .3s;
+  }
+  .toggle input:checked + .toggle-track { background: rgba(200,168,75,0.4); }
+  .toggle input:checked + .toggle-track::before { transform: translateX(18px); background: var(--gilt); }
+
+  /* ── CSS editor ── */
+  .css-editor {
+    display: none;
+    animation: fadeIn .3s ease;
+  }
+  .css-editor.open { display: block; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(-8px) } to { opacity:1; transform:none } }
+
+  .css-tabs { display: flex; gap: .3rem; margin-bottom: .75rem; }
+  .css-tab {
+    padding: .35rem .75rem; border: 1px solid var(--spine); border-radius: 4px;
+    background: var(--leaf); color: var(--muted); font-size: .78rem; font-family: var(--mono);
+    cursor: pointer; transition: all .2s;
+  }
+  .css-tab.active { background: rgba(200,168,75,0.15); color: var(--gilt); border-color: rgba(200,168,75,0.4); }
+
+  textarea.code { font-family: var(--mono); font-size: .78rem; line-height: 1.5; color: #c8dba8; min-height: 160px; }
+
+  /* ── Generate button ── */
+  .btn-generate {
+    width: 100%; padding: 1rem;
+    background: linear-gradient(135deg, #b8963f 0%, #d4a843 50%, #b8963f 100%);
+    background-size: 200% 100%;
+    color: var(--ink); font-family: var(--display); font-size: 1.1rem; font-weight: 700;
+    border: none; border-radius: var(--radius); cursor: pointer;
+    letter-spacing: .05em; transition: all .3s;
+    position: relative; overflow: hidden;
+    margin-top: .5rem;
+  }
+  .btn-generate::before {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(135deg, transparent 30%, rgba(255,255,255,0.2) 50%, transparent 70%);
+    transform: translateX(-100%); transition: transform .6s;
+  }
+  .btn-generate:hover { background-position: right; box-shadow: 0 4px 24px rgba(200,168,75,0.4); }
+  .btn-generate:hover::before { transform: translateX(100%); }
+  .btn-generate:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-generate:active { transform: scale(.98); }
+
+  /* ── Progress / log ── */
+  .progress-wrap { display: none; }
+  .progress-wrap.visible { display: block; }
+
+  .log-box {
+    background: var(--ink); border: 1px solid var(--spine); border-radius: 4px;
+    padding: .75rem; font-family: var(--mono); font-size: .75rem;
+    max-height: 180px; overflow-y: auto; line-height: 1.7;
+    scrollbar-width: thin; scrollbar-color: var(--spine) transparent;
+  }
+  .log-line { opacity: 0; animation: logIn .2s ease forwards; }
+  @keyframes logIn { to{opacity:1} from{opacity:0} }
+  .log-ok   { color: #8dc; }
+  .log-info { color: var(--gilt); }
+  .log-warn { color: #e88; }
+  .log-muted{ color: var(--muted); }
+
+  .progress-bar-track { background: var(--spine); border-radius: 2px; height: 3px; margin-bottom: .75rem; overflow: hidden; }
+  .progress-bar-fill  { height: 100%; background: var(--gilt); width: 0%; transition: width .4s ease; border-radius: 2px; }
+
+  /* ── Success banner ── */
+  .success-banner {
+    display: none; text-align: center; padding: 1.5rem 1rem;
+    background: linear-gradient(135deg, rgba(200,168,75,0.08), rgba(200,168,75,0.04));
+    border: 1px solid rgba(200,168,75,0.3); border-radius: var(--radius);
+    animation: bounceIn .4s ease;
+  }
+  .success-banner.visible { display: block; }
+  @keyframes bounceIn { 0%{transform:scale(.9);opacity:0} 70%{transform:scale(1.02)} 100%{transform:scale(1);opacity:1} }
+  .success-banner .big-icon { font-size: 3rem; margin-bottom: .5rem; }
+  .success-banner h3 { font-family: var(--display); font-size: 1.3rem; margin-bottom: .3rem; }
+  .success-banner p  { color: var(--muted); font-size: .88rem; }
+
+  /* ── Info chip ── */
+  .info { display: inline-flex; align-items: center; gap: .4rem; background: rgba(200,168,75,0.08); border: 1px solid rgba(200,168,75,0.2); border-radius: 4px; padding: .35rem .65rem; font-size: .8rem; color: var(--gilt); margin-top: .5rem; }
+
+  /* ── Utility ── */
+  .divider { height: 1px; background: var(--spine); margin: .75rem 0; }
+  .text-muted { color: var(--muted); font-size: .85rem; }
+  .mt-1 { margin-top: .5rem; }
+
+  @media (max-width: 400px) {
+    .form-row { grid-template-columns: 1fr; }
+    header h1 { font-size: 1.3rem; }
+  }
+
+  /* ── Help Modal ── */
+  .modal-backdrop {
+    position: fixed; inset: 0; z-index: 10000;
+    background: rgba(10,8,5,0.85);
+    backdrop-filter: blur(6px);
+    display: flex; align-items: flex-end; justify-content: center;
+    opacity: 0; pointer-events: none;
+    transition: opacity .3s;
+  }
+  .modal-backdrop.open { opacity: 1; pointer-events: all; }
+
+  .modal {
+    background: var(--paper);
+    border: 1px solid rgba(200,168,75,0.25);
+    border-bottom: none;
+    border-radius: 16px 16px 0 0;
+    width: 100%; max-width: 680px;
+    max-height: 88dvh;
+    display: flex; flex-direction: column;
+    transform: translateY(100%);
+    transition: transform .38s cubic-bezier(.32,1.2,.5,1);
+    box-shadow: 0 -8px 48px rgba(0,0,0,0.6), 0 0 0 1px rgba(200,168,75,0.1);
+  }
+  .modal-backdrop.open .modal { transform: translateY(0); }
+
+  .modal-handle {
+    width: 40px; height: 4px; border-radius: 2px;
+    background: var(--spine); margin: .9rem auto .5rem;
+    flex-shrink: 0;
+  }
+
+  .modal-header {
+    padding: .5rem 1.25rem 1rem;
+    border-bottom: 1px solid var(--spine);
+    display: flex; align-items: center; gap: .75rem;
+    flex-shrink: 0;
+  }
+  .modal-header h2 { font-family: var(--display); font-size: 1.25rem; font-weight: 600; }
+  .modal-header .modal-badge { font-family: var(--mono); font-size: .7rem; background: rgba(200,168,75,0.12); color: var(--gilt); padding: .15rem .5rem; border-radius: 3px; border: 1px solid rgba(200,168,75,0.25); }
+  .btn-close {
+    margin-left: auto; background: none; border: none; color: var(--muted);
+    font-size: 1.4rem; cursor: pointer; line-height: 1; padding: .2rem .4rem;
+    border-radius: 4px; transition: color .2s, background .2s;
+  }
+  .btn-close:hover { color: var(--cream); background: var(--spine); }
+
+  .modal-body {
+    overflow-y: auto; padding: 1.25rem;
+    scrollbar-width: thin; scrollbar-color: var(--spine) transparent;
+    flex: 1;
+  }
+
+  /* Manual content styles */
+  .manual-section { margin-bottom: 2rem; }
+  .manual-section:last-child { margin-bottom: 0; }
+
+  .manual-section h3 {
+    font-family: var(--display); font-size: 1.05rem; font-weight: 600;
+    color: var(--gilt); margin-bottom: .75rem;
+    display: flex; align-items: center; gap: .5rem;
+    padding-bottom: .4rem; border-bottom: 1px solid var(--spine);
+  }
+
+  .manual-section p { font-size: .92rem; color: var(--cream); line-height: 1.65; margin-bottom: .5rem; }
+  .manual-section p:last-child { margin-bottom: 0; }
+
+  .manual-step {
+    display: flex; gap: .85rem; align-items: flex-start;
+    padding: .75rem; background: var(--leaf); border: 1px solid var(--spine);
+    border-radius: 6px; margin-bottom: .5rem;
+    transition: border-color .2s;
+  }
+  .manual-step:hover { border-color: rgba(200,168,75,0.25); }
+  .step-num {
+    width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+    background: rgba(200,168,75,0.15); border: 1px solid rgba(200,168,75,0.35);
+    color: var(--gilt); font-family: var(--mono); font-size: .75rem; font-weight: 500;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .step-body strong { display: block; font-size: .9rem; margin-bottom: .2rem; color: var(--cream); }
+  .step-body span   { font-size: .82rem; color: var(--muted); line-height: 1.5; }
+
+  .dir-tree {
+    background: var(--ink); border: 1px solid var(--spine); border-radius: 6px;
+    padding: .9rem 1rem; font-family: var(--mono); font-size: .78rem;
+    line-height: 1.9; color: var(--muted); margin: .5rem 0;
+  }
+  .dir-tree .hl { color: var(--gilt); }
+  .dir-tree .ok { color: #8dc; }
+  .dir-tree .img{ color: #a8d8ea; }
+
+  .tip-box {
+    background: rgba(200,168,75,0.06); border: 1px solid rgba(200,168,75,0.2);
+    border-left: 3px solid var(--gilt); border-radius: 4px;
+    padding: .65rem .9rem; font-size: .85rem; color: var(--cream);
+    line-height: 1.55; margin: .6rem 0;
+  }
+  .tip-box .tip-label { font-family: var(--mono); font-size: .7rem; color: var(--gilt); text-transform: uppercase; letter-spacing: .06em; display: block; margin-bottom: .25rem; }
+
+  .warn-box {
+    background: rgba(192,57,43,0.08); border: 1px solid rgba(192,57,43,0.25);
+    border-left: 3px solid #c0392b; border-radius: 4px;
+    padding: .65rem .9rem; font-size: .85rem; color: var(--cream);
+    line-height: 1.55; margin: .6rem 0;
+  }
+  .warn-box .tip-label { font-family: var(--mono); font-size: .7rem; color: #e88; text-transform: uppercase; letter-spacing: .06em; display: block; margin-bottom: .25rem; }
+
+  .tag-row { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0; }
+  .tag {
+    font-family: var(--mono); font-size: .72rem;
+    padding: .2rem .55rem; border-radius: 3px;
+    background: var(--leaf); border: 1px solid var(--spine); color: var(--muted);
+  }
+  .tag.green  { background: rgba(80,160,100,0.12); color: #8dc; border-color: rgba(80,160,100,0.25); }
+  .tag.gold   { background: rgba(200,168,75,0.12); color: var(--gilt); border-color: rgba(200,168,75,0.25); }
+  .tag.red    { background: rgba(192,57,43,0.12); color: #e88; border-color: rgba(192,57,43,0.25); }
+
+  .kbd { display: inline-block; font-family: var(--mono); font-size: .75rem; background: var(--spine); color: var(--cream); padding: .1rem .4rem; border-radius: 3px; border: 1px solid rgba(255,255,255,0.1); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-mark">✦</div>
+  <div>
+    <h1>EPUB Forge</h1>
+    <p>Craft Kindle-ready ebooks from your manuscript folder</p>
+  </div>
+  <button class="btn-help" onclick="openHelp()" title="User Manual">?</button>
+</header>
+
+<main>
+
+  <!-- Step 1: Folder -->
+  <div class="card" id="card-folder">
+    <div class="card-header">
+      <span class="icon">📁</span>
+      <h2>Book Folder</h2>
+    </div>
+    <div class="card-body">
+      <div class="dropzone" id="dropzone">
+        <input type="file" id="folderInput" webkitdirectory multiple accept=".html,.htm,.jpg,.jpeg,.png,.gif,.webp,.svg"/>
+        <span class="dz-icon">📚</span>
+        <h3>Select your book folder</h3>
+        <p>Tap to browse · Supports <span class="gilt">chapters/*.html</span> + images</p>
+      </div>
+
+      <div class="scan-result" id="scanResult">
+        <img id="coverPreview" class="cover-preview" style="display:none" alt="Cover"/>
+        <div class="file-grid" id="fileGrid"></div>
+        <div class="info" id="scanInfo"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2: Metadata -->
+  <div class="card" id="card-meta">
+    <div class="card-header">
+      <span class="icon">✍️</span>
+      <h2>Book Details</h2>
+    </div>
+    <div class="card-body">
+      <div class="form-grid">
+        <div>
+          <label>Title *</label>
+          <input type="text" id="metaTitle" placeholder="My Great Novel"/>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>Author *</label>
+            <input type="text" id="metaAuthor" placeholder="Jane Doe"/>
+          </div>
+          <div>
+            <label>Language</label>
+            <select id="metaLang">
+              <option value="en">English</option>
+              <option value="hi">Hindi</option>
+              <option value="ta">Tamil</option>
+              <option value="te">Telugu</option>
+              <option value="ml">Malayalam</option>
+              <option value="bn">Bengali</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="es">Spanish</option>
+              <option value="ja">Japanese</option>
+              <option value="zh">Chinese</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>Publisher</label>
+            <input type="text" id="metaPublisher" placeholder="Self-Published"/>
+          </div>
+          <div>
+            <label>Date</label>
+            <input type="date" id="metaDate"/>
+          </div>
+        </div>
+        <div>
+          <label>Description</label>
+          <textarea id="metaDesc" placeholder="A short blurb about your book…"></textarea>
+        </div>
+        <div>
+          <label>Rights</label>
+          <input type="text" id="metaRights" placeholder="© 2025 Jane Doe. All rights reserved."/>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3: Options -->
+  <div class="card" id="card-options">
+    <div class="card-header">
+      <span class="icon">⚙️</span>
+      <h2>Kindle Options</h2>
+    </div>
+    <div class="card-body">
+      <div class="toggle-row">
+        <div class="toggle-label">Cover page
+          <span>Full-bleed cover as first page</span>
+        </div>
+        <label class="toggle"><input type="checkbox" id="optCoverPage" checked/><span class="toggle-track"></span></label>
+      </div>
+      <div class="toggle-row">
+        <div class="toggle-label">Table of Contents page
+          <span>Readable TOC before chapters</span>
+        </div>
+        <label class="toggle"><input type="checkbox" id="optTOC" checked/><span class="toggle-track"></span></label>
+      </div>
+      <div class="toggle-row">
+        <div class="toggle-label">Custom CSS
+          <span>Kindle-optimised typography</span>
+        </div>
+        <label class="toggle"><input type="checkbox" id="optCSS" checked/><span class="toggle-track"></span></label>
+      </div>
+
+      <div class="css-editor mt-1" id="cssEditor">
+        <div class="css-tabs">
+          <button class="css-tab active" onclick="switchTab('kindle')">Kindle Classic</button>
+          <button class="css-tab" onclick="switchTab('modern')">Modern Clean</button>
+          <button class="css-tab" onclick="switchTab('custom')">Custom</button>
+        </div>
+        <div>
+          <label>CSS preview / edit</label>
+          <textarea class="code" id="cssContent" spellcheck="false"></textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generate -->
+  <div id="progressWrap" class="progress-wrap">
+    <div class="card-body" style="padding:.75rem">
+      <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill"></div></div>
+      <div class="log-box" id="logBox"></div>
+    </div>
+  </div>
+
+  <div class="success-banner" id="successBanner">
+    <div class="big-icon">📖</div>
+    <h3>Your EPUB is ready!</h3>
+    <p id="successMsg">Transfer it to Kindle via USB, email, or the Send-to-Kindle app.</p>
+  </div>
+
+  <button class="btn-generate" id="btnGenerate" onclick="generate()">
+    ✦ Forge EPUB
+  </button>
+
+</main>
+
+<!-- ── Help Modal ── -->
+<div class="modal-backdrop" id="helpBackdrop" onclick="closeHelpOutside(event)">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="User Manual">
+    <div class="modal-handle"></div>
+
+    <div class="modal-header">
+      <span style="font-size:1.2rem">📖</span>
+      <h2>User Manual</h2>
+      <span class="modal-badge">EPUB Forge</span>
+      <button class="btn-close" onclick="closeHelp()" aria-label="Close">×</button>
+    </div>
+
+    <div class="modal-body">
+
+      <!-- Quick Start -->
+      <div class="manual-section">
+        <h3>🚀 Quick Start</h3>
+        <div class="manual-step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <strong>Prepare your book folder</strong>
+            <span>Put your cover image at the root and chapters inside a <span class="kbd">chapters/</span> subfolder. Images used in chapters can live alongside the HTML files.</span>
+          </div>
+        </div>
+        <div class="manual-step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <strong>Select the folder</strong>
+            <span>Tap the drop zone and choose your root book folder. EPUB Forge scans it automatically — cover, chapters, and images are all detected.</span>
+          </div>
+        </div>
+        <div class="manual-step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <strong>Fill in book details</strong>
+            <span>Enter the title, author, and optional metadata. These appear in your Kindle library and on the ebook's info page.</span>
+          </div>
+        </div>
+        <div class="manual-step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <strong>Choose Kindle options</strong>
+            <span>Toggle cover page, table of contents, and custom CSS. Pick a CSS preset or write your own for precise typography control.</span>
+          </div>
+        </div>
+        <div class="manual-step">
+          <div class="step-num">5</div>
+          <div class="step-body">
+            <strong>Tap ✦ Forge EPUB</strong>
+            <span>Watch the build log, then your <span class="kbd">.epub</span> file downloads automatically. Transfer it to Kindle.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Folder structure -->
+      <div class="manual-section">
+        <h3>📁 Folder Structure</h3>
+        <p>Your book folder must follow this layout. EPUB Forge uses file names and paths to identify each asset's role:</p>
+        <div class="dir-tree">
+          <span class="hl">my-book/</span><br>
+          ├── <span class="ok">cover.jpeg</span> &nbsp;&nbsp;&nbsp;&nbsp;← root-level image named "cover"<br>
+          └── <span class="hl">chapters/</span><br>
+          &nbsp;&nbsp;&nbsp;&nbsp;├── <span class="ok">0_The_Autograph.html</span><br>
+          &nbsp;&nbsp;&nbsp;&nbsp;├── <span class="ok">1_The_Name.html</span><br>
+          &nbsp;&nbsp;&nbsp;&nbsp;└── <span class="img">judy.jpeg</span> &nbsp;&nbsp;← inline image
+        </div>
+        <div class="tip-box">
+          <span class="tip-label">💡 Tip — Chapter ordering</span>
+          Chapter files are sorted by their numeric prefix. Name them <span class="kbd">0_Intro.html</span>, <span class="kbd">1_Part_One.html</span> etc. and they'll appear in the correct order.
+        </div>
+        <div class="tip-box">
+          <span class="tip-label">💡 Tip — Title extraction</span>
+          The chapter title shown in the TOC is derived from the filename: <span class="kbd">2_The_Dark_Forest.html</span> becomes <em>"The Dark Forest"</em>. Use underscores or hyphens as word separators.
+        </div>
+      </div>
+
+      <!-- Supported file types -->
+      <div class="manual-section">
+        <h3>📎 Supported File Types</h3>
+        <p>Chapter content:</p>
+        <div class="tag-row">
+          <span class="tag gold">.html</span>
+          <span class="tag gold">.htm</span>
+        </div>
+        <p style="margin-top:.6rem">Images (cover + inline):</p>
+        <div class="tag-row">
+          <span class="tag green">.jpg / .jpeg</span>
+          <span class="tag green">.png</span>
+          <span class="tag green">.webp</span>
+          <span class="tag green">.gif</span>
+          <span class="tag green">.svg</span>
+          <span class="tag green">.avif</span>
+        </div>
+        <div class="warn-box" style="margin-top:.6rem">
+          <span class="tip-label">⚠ Not supported</span>
+          Fonts, audio, video, and JavaScript are stripped or ignored. EPUB Forge is for text + images books only.
+        </div>
+      </div>
+
+      <!-- Chapter HTML guide -->
+      <div class="manual-section">
+        <h3>✍️ Writing Chapter HTML</h3>
+        <p>You only need to write the <strong>body content</strong> — no <span class="kbd">&lt;html&gt;</span>, <span class="kbd">&lt;head&gt;</span>, or <span class="kbd">&lt;body&gt;</span> tags required (they're stripped automatically if present).</p>
+        <p>Supported elements include headings, paragraphs, blockquotes, lists, tables, figures, and inline images. Reference any image from your <span class="kbd">chapters/</span> folder simply by filename:</p>
+        <div class="dir-tree">
+&lt;figure&gt;<br>
+&nbsp;&nbsp;&lt;img src="judy.jpeg" alt="Judy"/&gt;<br>
+&nbsp;&nbsp;&lt;figcaption&gt;Illustration&lt;/figcaption&gt;<br>
+&lt;/figure&gt;
+        </div>
+        <div class="tip-box">
+          <span class="tip-label">💡 Auto path rewriting</span>
+          EPUB Forge rewrites <span class="kbd">src="judy.jpeg"</span> to the correct EPUB-internal path automatically. You never need to worry about relative paths.
+        </div>
+      </div>
+
+      <!-- CSS presets -->
+      <div class="manual-section">
+        <h3>🎨 CSS Presets</h3>
+        <div class="manual-step" style="margin-bottom:.4rem">
+          <div class="step-num" style="background:rgba(200,168,75,0.15);color:var(--gilt)">K</div>
+          <div class="step-body">
+            <strong>Kindle Classic</strong>
+            <span>Warm Georgia serif, 1.75 line-height, indented paragraphs. Matches the look of traditionally typeset paperbacks. Best for fiction and narrative non-fiction.</span>
+          </div>
+        </div>
+        <div class="manual-step" style="margin-bottom:.4rem">
+          <div class="step-num" style="background:rgba(160,200,255,0.1);color:#a8d0f0">M</div>
+          <div class="step-body">
+            <strong>Modern Clean</strong>
+            <span>Sans-serif, flush-left headings with a bold underline accent. Better for essays, technical writing, or anything that should feel contemporary.</span>
+          </div>
+        </div>
+        <div class="manual-step">
+          <div class="step-num" style="background:rgba(160,220,180,0.1);color:#8dc">C</div>
+          <div class="step-body">
+            <strong>Custom</strong>
+            <span>Write your own CSS from scratch. The editor is fully editable — changes apply only to the generated EPUB, not to this app.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sending to Kindle -->
+      <div class="manual-section">
+        <h3>📱 Sending to Kindle</h3>
+        <div class="manual-step">
+          <div class="step-num">A</div>
+          <div class="step-body">
+            <strong>Send-to-Kindle app (easiest on Android)</strong>
+            <span>Install the Amazon Send-to-Kindle app. Share the <span class="kbd">.epub</span> file to it from your Downloads folder. It converts and syncs automatically.</span>
+          </div>
+        </div>
+        <div class="manual-step">
+          <div class="step-num">B</div>
+          <div class="step-body">
+            <strong>Email to your Kindle address</strong>
+            <span>Find your Kindle email at <em>Amazon → Manage Your Content → Preferences → Personal Document Settings</em>. Email the <span class="kbd">.epub</span> as an attachment.</span>
+          </div>
+        </div>
+        <div class="manual-step">
+          <div class="step-num">C</div>
+          <div class="step-body">
+            <strong>USB cable</strong>
+            <span>Connect your Kindle to a PC/Mac. Copy the <span class="kbd">.epub</span> into the <span class="kbd">documents/</span> folder. Disconnect and it appears in your library.</span>
+          </div>
+        </div>
+        <div class="tip-box">
+          <span class="tip-label">💡 Kindle format note</span>
+          Modern Kindles (2022+) natively open EPUB 3 files. Older devices may need Calibre to convert to <span class="kbd">.mobi</span> or <span class="kbd">.azw3</span> first.
+        </div>
+      </div>
+
+      <!-- Troubleshooting -->
+      <div class="manual-section">
+        <h3>🔧 Troubleshooting</h3>
+        <div class="manual-step">
+          <div class="step-num" style="color:#e88;border-color:rgba(192,57,43,0.4);background:rgba(192,57,43,0.1)">!</div>
+          <div class="step-body">
+            <strong>No chapters detected</strong>
+            <span>Ensure HTML files are inside a subfolder (e.g. <span class="kbd">chapters/</span>). Files at the root level are not treated as chapters.</span>
+          </div>
+        </div>
+        <div class="manual-step">
+          <div class="step-num" style="color:#e88;border-color:rgba(192,57,43,0.4);background:rgba(192,57,43,0.1)">!</div>
+          <div class="step-body">
+            <strong>Cover not found</strong>
+            <span>The cover image must be at the root of the folder and have "cover" in its filename: <span class="kbd">cover.jpg</span>, <span class="kbd">cover.png</span>, etc.</span>
+          </div>
+        </div>
+        <div class="manual-step">
+          <div class="step-num" style="color:#e88;border-color:rgba(192,57,43,0.4);background:rgba(192,57,43,0.1)">!</div>
+          <div class="step-body">
+            <strong>Images not showing in EPUB</strong>
+            <span>Keep image files alongside your HTML files in the same subfolder. EPUB Forge matches by filename — make sure the <span class="kbd">src</span> attribute uses just the filename, not a full path.</span>
+          </div>
+        </div>
+        <div class="manual-step">
+          <div class="step-num" style="color:#e88;border-color:rgba(192,57,43,0.4);background:rgba(192,57,43,0.1)">!</div>
+          <div class="step-body">
+            <strong>Wrong chapter order</strong>
+            <span>Prefix filenames with a number: <span class="kbd">0_</span>, <span class="kbd">1_</span>, <span class="kbd">2_</span>… Chapters are sorted numerically, so <span class="kbd">10_</span> correctly comes after <span class="kbd">9_</span>.</span>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /modal-body -->
+  </div><!-- /modal -->
+</div><!-- /modal-backdrop -->
+
+<script>
+// ──────────────────────────────────────────────
+// Help modal
+// ──────────────────────────────────────────────
+function openHelp() {
+  const bd = document.getElementById('helpBackdrop');
+  bd.classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeHelp() {
+  const bd = document.getElementById('helpBackdrop');
+  bd.classList.remove('open');
+  document.body.style.overflow = '';
+}
+function closeHelpOutside(e) {
+  if (e.target === document.getElementById('helpBackdrop')) closeHelp();
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeHelp(); });
+
+// ──────────────────────────────────────────────
+// State
+// ──────────────────────────────────────────────
+let scannedFiles = {
+  cover: null,        // { file, name }
+  chapters: [],       // [{ file, name, title, order }]
+  images: [],         // [{ file, name }]
+};
+
+const CSS_PRESETS = {
+  kindle: `/* Kindle Classic — warm serif typography */
+body {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1em;
+  line-height: 1.75;
+  margin: 0 auto;
+  max-width: 34em;
+  padding: 1.5em 1.2em;
+  color: #1a1510;
+}
+h1, h2, h3, h4 {
+  font-family: Georgia, serif;
+  font-weight: bold;
+  line-height: 1.3;
+  margin: 2em 0 0.6em;
+  page-break-after: avoid;
+}
+h1 { font-size: 1.7em; text-align: center; margin-top: 3em; }
+h2 { font-size: 1.3em; }
+h3 { font-size: 1.1em; }
+p {
+  margin: 0;
+  text-indent: 1.4em;
+  orphans: 2; widows: 2;
+}
+p + p { margin-top: 0.7em; }
+p:first-of-type, h1 + p, h2 + p, h3 + p { text-indent: 0; }
+blockquote {
+  margin: 1.5em 1.5em;
+  padding: 0.5em 1em;
+  border-left: 2px solid #999;
+  color: #555;
+  font-style: italic;
+}
+img { max-width: 100%; height: auto; display: block; margin: 1.5em auto; }
+figure { margin: 2em 0; text-align: center; }
+figcaption { font-size: 0.85em; color: #777; margin-top: 0.4em; font-style: italic; }
+a { color: #333; text-decoration: underline; }
+hr { border: none; border-top: 1px solid #ccc; margin: 2em auto; width: 40%; }
+pre, code { font-family: monospace; font-size: 0.88em; background: #f5f5f0; padding: 0.1em 0.3em; }
+pre { padding: 1em; overflow-x: auto; line-height: 1.5; }
+table { border-collapse: collapse; width: 100%; margin: 1.5em 0; font-size: 0.9em; }
+th, td { border: 1px solid #ddd; padding: 0.4em 0.8em; text-align: left; }
+th { background: #f0ede8; font-weight: bold; }`,
+
+  modern: `/* Modern Clean — minimal sans-serif */
+body {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 1em;
+  line-height: 1.8;
+  margin: 0 auto;
+  max-width: 36em;
+  padding: 2em 1.5em;
+  color: #111;
+}
+h1, h2, h3 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 2.5em 0 0.7em;
+  line-height: 1.2;
+}
+h1 { font-size: 2em; text-align: left; border-bottom: 3px solid #111; padding-bottom: 0.3em; }
+h2 { font-size: 1.35em; }
+p  { margin: 0 0 1em; }
+blockquote { border-left: 4px solid #111; padding-left: 1em; margin: 1.5em 0; }
+img { max-width: 100%; display: block; margin: 2em auto; }
+a  { color: #000; }
+hr { border: none; border-top: 2px solid #111; margin: 2em 0; width: 4em; }`,
+
+  custom: `/* Your custom CSS here */\nbody {\n  font-family: Georgia, serif;\n  font-size: 1em;\n  line-height: 1.7;\n  color: #1a1a1a;\n}`
+};
+
+// ──────────────────────────────────────────────
+// Init
+// ──────────────────────────────────────────────
+document.getElementById('metaDate').value = new Date().toISOString().split('T')[0];
+document.getElementById('cssContent').value = CSS_PRESETS.kindle;
+
+document.getElementById('optCSS').addEventListener('change', e => {
+  document.getElementById('cssEditor').classList.toggle('open', e.target.checked);
+});
+document.getElementById('cssEditor').classList.add('open');
+
+function switchTab(preset) {
+  document.querySelectorAll('.css-tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  if (preset !== 'custom') {
+    document.getElementById('cssContent').value = CSS_PRESETS[preset];
+  }
+}
+
+// ──────────────────────────────────────────────
+// Folder scan
+// ──────────────────────────────────────────────
+document.getElementById('folderInput').addEventListener('change', function(e) {
+  scanFiles(Array.from(e.target.files));
+});
+
+function naturalSort(a, b) {
+  return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function extractTitle(filename) {
+  // "0_The_Autograph.html" → "The Autograph"
+  return filename
+    .replace(/\.\w+$/, '')           // remove extension
+    .replace(/^\d+[_\-\s]*/, '')     // remove leading number prefix
+    .replace(/[_-]/g, ' ')           // underscores → spaces
+    .replace(/\b\w/g, c => c.toUpperCase()); // title case
+}
+
+async function scanFiles(files) {
+  scannedFiles = { cover: null, chapters: [], images: [] };
+
+  const coverExts = /\.(jpg|jpeg|png|gif|webp)$/i;
+  const htmlExts  = /\.(html|htm)$/i;
+  const imgExts   = /\.(jpg|jpeg|png|gif|webp|svg|avif)$/i;
+
+  for (const f of files) {
+    const path = f.webkitRelativePath || f.name;
+    const name = path.split('/').pop();
+    const parts = path.split('/');
+
+    // cover: root-level image named "cover"
+    if (parts.length <= 2 && /cover/i.test(name) && coverExts.test(name)) {
+      scannedFiles.cover = { file: f, name };
+    }
+    // chapters: any .html file inside a subfolder
+    else if (htmlExts.test(name) && parts.length >= 2) {
+      scannedFiles.chapters.push({ file: f, name, path });
+    }
+    // images in chapters subdir (not the html files)
+    else if (imgExts.test(name) && parts.length >= 2 && !/cover/i.test(name)) {
+      scannedFiles.images.push({ file: f, name });
+    }
+  }
+
+  // Sort chapters by numeric prefix
+  scannedFiles.chapters.sort(naturalSort);
+
+  // Render
+  renderScan();
+}
+
+function renderScan() {
+  const sr = document.getElementById('scanResult');
+  const grid = document.getElementById('fileGrid');
+  const info = document.getElementById('scanInfo');
+  grid.innerHTML = '';
+
+  // Cover preview
+  if (scannedFiles.cover) {
+    const prev = document.getElementById('coverPreview');
+    const url = URL.createObjectURL(scannedFiles.cover.file);
+    prev.src = url; prev.style.display = 'block';
+  }
+
+  let delay = 0;
+  const addItem = (type, label, order='') => {
+    const div = document.createElement('div');
+    div.className = 'file-item';
+    div.style.animationDelay = `${delay}ms`;
+    delay += 40;
+    div.innerHTML = `<span class="fi-type ${type}">${type.toUpperCase()}</span><span class="fi-name">${label}</span><span class="fi-order">${order}</span>`;
+    grid.appendChild(div);
+  };
+
+  if (scannedFiles.cover)     addItem('cover', scannedFiles.cover.name);
+  scannedFiles.chapters.forEach((c,i) => addItem('chapter', c.name, `#${i+1}`));
+  scannedFiles.images.forEach(img     => addItem('image', img.name));
+
+  const total = scannedFiles.chapters.length;
+  info.textContent = `✦ ${total} chapter${total!==1?'s':''} · ${scannedFiles.images.length} image${scannedFiles.images.length!==1?'s':''} · ${scannedFiles.cover?'cover found':'no cover'}`;
+
+  sr.classList.add('visible');
+
+  // Auto-fill title from folder name
+  if (!document.getElementById('metaTitle').value) {
+    const files = document.getElementById('folderInput').files;
+    if (files.length) {
+      const parts = (files[0].webkitRelativePath||'').split('/');
+      if (parts.length > 1) document.getElementById('metaTitle').value = parts[0].replace(/[_-]/g,' ');
+    }
+  }
+}
+
+// ──────────────────────────────────────────────
+// Read file as base64 or text
+// ──────────────────────────────────────────────
+function readAsText(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = rej;
+    r.readAsText(file);
+  });
+}
+
+function readAsArrayBuffer(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = rej;
+    r.readAsArrayBuffer(file);
+  });
+}
+
+// ──────────────────────────────────────────────
+// Logging
+// ──────────────────────────────────────────────
+let logLines = 0;
+function log(msg, type='info') {
+  const box = document.getElementById('logBox');
+  const line = document.createElement('div');
+  line.className = `log-line log-${type}`;
+  line.textContent = `${new Date().toLocaleTimeString('en-US',{hour12:false})}  ${msg}`;
+  line.style.animationDelay = `${logLines++ * 30}ms`;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+function setProgress(pct) {
+  document.getElementById('progressFill').style.width = pct + '%';
+}
+
+// ──────────────────────────────────────────────
+// Rewrite image paths in chapter HTML
+// ──────────────────────────────────────────────
+function rewriteImagePaths(html, imageNames) {
+  // Replace src="filename.jpg" or src="./filename.jpg" with src="../images/filename.jpg"
+  return html.replace(/src=["']([^"']+)["']/gi, (match, src) => {
+    const base = src.split('/').pop();
+    if (imageNames.includes(base)) {
+      return `src="../images/${base}"`;
+    }
+    return match;
+  });
+}
+
+// ──────────────────────────────────────────────
+// Main generate
+// ──────────────────────────────────────────────
+async function generate() {
+  const title   = document.getElementById('metaTitle').value.trim();
+  const author  = document.getElementById('metaAuthor').value.trim();
+
+  if (!title || !author) { alert('Please fill in Title and Author.'); return; }
+  if (!scannedFiles.chapters.length) { alert('No chapters found. Please select your book folder first.'); return; }
+
+  const btn = document.getElementById('btnGenerate');
+  btn.disabled = true;
+  document.getElementById('successBanner').classList.remove('visible');
+  document.getElementById('logBox').innerHTML = '';
+  logLines = 0;
+
+  const pw = document.getElementById('progressWrap');
+  pw.classList.add('visible');
+  setProgress(0);
+
+  log('Initialising EPUB Forge…', 'info');
+
+  try {
+    // ── Build book ──
+    const book = new EBook({
+      title,
+      author,
+      language:    document.getElementById('metaLang').value,
+      publisher:   document.getElementById('metaPublisher').value.trim() || undefined,
+      description: document.getElementById('metaDesc').value.trim()      || undefined,
+      date:        document.getElementById('metaDate').value             || undefined,
+      rights:      document.getElementById('metaRights').value.trim()    || undefined,
+    });
+
+    setProgress(10);
+    log(`Book: "${title}" by ${author}`, 'ok');
+
+    // ── CSS ──
+    const useCSS  = document.getElementById('optCSS').checked;
+    const cssText = document.getElementById('cssContent').value;
+    if (useCSS && cssText.trim()) {
+      book.addCSS('kindle.css', cssText);
+      log('Stylesheet added', 'ok');
+    }
+
+    setProgress(20);
+
+    // ── Cover ──
+    const useCoverPage = document.getElementById('optCoverPage').checked;
+    if (scannedFiles.cover) {
+      const ab = await readAsArrayBuffer(scannedFiles.cover.file);
+      const mime = scannedFiles.cover.file.type || 'image/jpeg';
+      book.setCover(ab, mime, scannedFiles.cover.name, { asPage: useCoverPage, altText: title + ' cover' });
+      log(`Cover set: ${scannedFiles.cover.name}`, 'ok');
+    } else {
+      log('No cover image found — skipping', 'warn');
+    }
+
+    setProgress(35);
+
+    // ── TOC ──
+    if (document.getElementById('optTOC').checked) {
+      book.addTOCPage({ title: 'Contents', css: useCSS ? ['kindle.css'] : [] });
+      log('Table of Contents page added', 'ok');
+    }
+
+    setProgress(45);
+
+    // ── Images ──
+    const imageNames = scannedFiles.images.map(i => i.name);
+    for (const img of scannedFiles.images) {
+      const ab = await readAsArrayBuffer(img.file);
+      const mime = img.file.type || guessMime(img.name);
+      book.addImage(img.name, ab, mime);
+      log(`Image: ${img.name}`, 'muted');
+    }
+
+    setProgress(60);
+    if (scannedFiles.images.length) log(`${scannedFiles.images.length} image(s) packaged`, 'ok');
+
+    // ── Chapters ──
+    const chapterCount = scannedFiles.chapters.length;
+    for (let i = 0; i < chapterCount; i++) {
+      const ch = scannedFiles.chapters[i];
+      let html = await readAsText(ch.file);
+
+      // Strip full document wrapper if present, keep body content
+      const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+      if (bodyMatch) html = bodyMatch[1];
+
+      // Rewrite image paths
+      html = rewriteImagePaths(html, imageNames);
+
+      const chTitle = extractTitle(ch.name);
+      book.addChapter(chTitle, html, { css: useCSS ? ['kindle.css'] : [], order: i });
+      log(`Chapter ${i+1}: "${chTitle}"`, 'ok');
+
+      setProgress(60 + Math.round((i+1) / chapterCount * 30));
+    }
+
+    // ── Generate ──
+    log('Generating EPUB…', 'info');
+    setProgress(95);
+
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+    await book.download(`${slug}.epub`);
+
+    setProgress(100);
+    log('Done! ✦', 'ok');
+
+    document.getElementById('successBanner').classList.add('visible');
+    document.getElementById('successMsg').textContent =
+      `"${slug}.epub" downloaded. Send to Kindle via USB, email, or the Send-to-Kindle app.`;
+
+  } catch (err) {
+    log('ERROR: ' + (err.message || err), 'warn');
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function guessMime(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  const map = { jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', gif:'image/gif', webp:'image/webp', svg:'image/svg+xml', avif:'image/avif' };
+  return map[ext] || 'image/jpeg';
+}
+
+// ──────────────────────────────────────────────
+// Drag-over highlight
+// ──────────────────────────────────────────────
+const dz = document.getElementById('dropzone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+dz.addEventListener('drop', e => {
+  e.preventDefault();
+  dz.classList.remove('drag');
+  // Note: webkitdirectory drag isn't widely supported on mobile, but handled gracefully
+});
+
+// ──────────────────────────────────────────────
+// PWA service worker (inline)
+// ──────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  const sw = `
+    const CACHE = 'epub-forge-v1';
+    const ASSETS = [self.location.href];
+    self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS))));
+    self.addEventListener('fetch', e => e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))));
+  `;
+  const blob = new Blob([sw], { type: 'application/javascript' });
+  navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(() => {});
+}
+</script>
+</body>
+</html>

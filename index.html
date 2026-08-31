@@ -473,7 +473,7 @@
   <div class="logo-mark">✦</div>
   <div>
     <h1>EPUB Forge</h1>
-    <p>Craft Kindle-ready ebooks from your manuscript folder</p>
+    <p>Craft Kindle-ready ebooks from your manuscript folder (.zip)</p>
   </div>
   <button class="btn-help" onclick="openHelp()" title="User Manual">?</button>
 </header>
@@ -492,10 +492,10 @@
     </div>
     <div class="card-body">
       <div class="dropzone" id="dropzone">
-        <input type="file" id="folderInput" webkitdirectory multiple accept=".html,.htm,.jpg,.jpeg,.png,.gif,.webp,.svg"/>
+        <input type="file" id="folderInput" accept=".zip,application/zip,application/x-zip-compressed"/>
         <span class="dz-icon">📚</span>
-        <h3>Select your book folder</h3>
-        <p>Tap to browse · Supports <span class="gilt">chapters/*.html</span> + images</p>
+        <h3>Select your book folder .zip</h3>
+        <p>Tap to browse · Zip your book folder first, then upload it here</p>
       </div>
 
       <div class="scan-result" id="scanResult">
@@ -660,8 +660,8 @@
         <div class="manual-step">
           <div class="step-num">2</div>
           <div class="step-body">
-            <strong>Select the folder</strong>
-            <span>Tap the drop zone and choose your root book folder. EPUB Forge scans it automatically — cover, chapters, and images are all detected.</span>
+            <strong>Zip and upload the folder</strong>
+            <span>Compress your root book folder into a <span class="kbd">.zip</span>, then tap the drop zone and choose it. EPUB Forge unpacks and scans it automatically — cover, chapters, and images are all detected.</span>
           </div>
         </div>
         <div class="manual-step">
@@ -690,7 +690,7 @@
       <!-- Folder structure -->
       <div class="manual-section">
         <h3>📁 Folder Structure</h3>
-        <p>Your book folder must follow this layout. EPUB Forge uses file names and paths to identify each asset's role:</p>
+        <p>Your book folder must follow this layout before you zip it. EPUB Forge uses file names and paths inside the zip to identify each asset's role:</p>
         <div class="dir-tree">
           <span class="hl">my-book/</span><br>
           ├── <span class="ok">cover.jpeg</span> &nbsp;&nbsp;&nbsp;&nbsp;← root-level image named "cover"<br>
@@ -812,7 +812,7 @@
           <div class="step-num" style="color:#e88;border-color:rgba(192,57,43,0.4);background:rgba(192,57,43,0.1)">!</div>
           <div class="step-body">
             <strong>No chapters detected</strong>
-            <span>Ensure HTML files are inside a subfolder (e.g. <span class="kbd">chapters/</span>). Files at the root level are not treated as chapters.</span>
+            <span>Ensure HTML files are inside a subfolder (e.g. <span class="kbd">chapters/</span>) inside the zip. Files at the root level are not treated as chapters.</span>
           </div>
         </div>
         <div class="manual-step">
@@ -969,8 +969,81 @@ function switchTab(preset) {
 // Folder scan
 // ──────────────────────────────────────────────
 document.getElementById('folderInput').addEventListener('change', function(e) {
-  scanFiles(Array.from(e.target.files));
+  const file = e.target.files[0];
+  if (file) handleZipUpload(file);
 });
+
+async function handleZipUpload(zipFile) {
+  if (!/\.zip$/i.test(zipFile.name)) {
+    alert('Please select a .zip file of your book folder.');
+    return;
+  }
+  try {
+    const zip = await JSZip.loadAsync(zipFile);
+    const entries = [];
+
+    // Detect a common single top-level folder (typical of zipped folders)
+    // so relative paths inside behave the same as webkitRelativePath did.
+    const allPaths = Object.keys(zip.files).filter(p => !zip.files[p].dir);
+    let stripPrefix = '';
+    if (allPaths.length) {
+      const firstSeg = allPaths[0].split('/')[0];
+      const allShareRoot = allPaths.every(p => p.split('/')[0] === firstSeg);
+      if (allShareRoot && allPaths.some(p => p.includes('/'))) {
+        stripPrefix = firstSeg + '/';
+      }
+    }
+
+    for (const path of allPaths) {
+      // Skip macOS/junk metadata
+      if (/(^|\/)__MACOSX(\/|$)/.test(path) || /(^|\/)\.DS_Store$/.test(path)) continue;
+
+      const finalPath = stripPrefix ? path.slice(stripPrefix.length) : path;
+      if (!finalPath) continue;
+
+      const zipEntry = zip.files[path];
+      const blob = await zipEntry.async('blob');
+      const name = finalPath.split('/').pop();
+      if (!name) continue;
+
+      // Wrap as a File-like object. We keep the defineProperty trick for
+      // webkitRelativePath as a best-effort compatibility shim, but scanFiles
+      // is also updated to accept an explicit path so this never depends on
+      // property shadowing behaving correctly across browsers.
+      const asFile = new File([blob], name, { type: blob.type });
+      try {
+        Object.defineProperty(asFile, 'webkitRelativePath', {
+          value: finalPath,
+          writable: false,
+          configurable: true,
+          enumerable: true
+        });
+      } catch (defineErr) {
+        // Ignore — the explicit __zipPath below is the real source of truth.
+      }
+      asFile.__zipPath = finalPath;
+      entries.push(asFile);
+    }
+
+    if (!entries.length) {
+      alert('That zip appears to be empty.');
+      return;
+    }
+
+    // Remember the top-level folder name (from the zip prefix, or the zip
+    // filename itself) so title auto-fill still works like before.
+    lastUploadRootName = stripPrefix
+      ? stripPrefix.replace(/\/$/, '')
+      : zipFile.name.replace(/\.zip$/i, '');
+
+    scanFiles(entries);
+  } catch (err) {
+    console.error(err);
+    alert('Could not read that zip file: ' + (err.message || err));
+  }
+}
+
+let lastUploadRootName = '';
 
 function naturalSort(a, b) {
   return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
@@ -993,20 +1066,23 @@ async function scanFiles(files) {
   const imgExts   = /\.(jpg|jpeg|png|gif|webp|svg|avif)$/i;
 
   for (const f of files) {
-    const path = f.webkitRelativePath || f.name;
-    const name = path.split('/').pop();
-    const parts = path.split('/');
+    const path = (f.__zipPath || f.webkitRelativePath || f.name).replace(/^\/+/, '');
+    const parts = path.split('/').filter(Boolean);
+    const name = parts[parts.length - 1];
+    const parentFolder = parts.length >= 2 ? parts[parts.length - 2] : '';
 
-    // cover: root-level image named "cover"
-    if (parts.length <= 2 && /cover/i.test(name) && coverExts.test(name)) {
+    // cover: an image with "cover" in the name, anywhere near the root
+    // (not nested inside the chapters folder itself)
+    const inChaptersFolder = /^chapters$/i.test(parentFolder);
+    if (!inChaptersFolder && /cover/i.test(name) && coverExts.test(name)) {
       scannedFiles.cover = { file: f, name };
     }
-    // chapters: any .html file inside a subfolder
-    else if (htmlExts.test(name) && parts.length >= 2) {
+    // chapters: any .html file, regardless of folder depth
+    else if (htmlExts.test(name)) {
       scannedFiles.chapters.push({ file: f, name, path });
     }
-    // images in chapters subdir (not the html files)
-    else if (imgExts.test(name) && parts.length >= 2 && !/cover/i.test(name)) {
+    // images: anything else image-like (used inside chapters)
+    else if (imgExts.test(name) && !/cover/i.test(name)) {
       scannedFiles.images.push({ file: f, name });
     }
   }
@@ -1050,13 +1126,9 @@ function renderScan() {
 
   sr.classList.add('visible');
 
-  // Auto-fill title from folder name
-  if (!document.getElementById('metaTitle').value) {
-    const files = document.getElementById('folderInput').files;
-    if (files.length) {
-      const parts = (files[0].webkitRelativePath||'').split('/');
-      if (parts.length > 1) document.getElementById('metaTitle').value = parts[0].replace(/[_-]/g,' ');
-    }
+  // Auto-fill title from folder/zip name
+  if (!document.getElementById('metaTitle').value && lastUploadRootName) {
+    document.getElementById('metaTitle').value = lastUploadRootName.replace(/[_-]/g,' ');
   }
 }
 
@@ -1121,7 +1193,7 @@ async function generate() {
   const author  = document.getElementById('metaAuthor').value.trim();
 
   if (!title || !author) { alert('Please fill in Title and Author.'); return; }
-  if (!scannedFiles.chapters.length) { alert('No chapters found. Please select your book folder first.'); return; }
+  if (!scannedFiles.chapters.length) { alert('No chapters found. Please upload your book folder as a .zip first.'); return; }
 
   const btn = document.getElementById('btnGenerate');
   btn.disabled = true;
@@ -1250,7 +1322,8 @@ dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
 dz.addEventListener('drop', e => {
   e.preventDefault();
   dz.classList.remove('drag');
-  // Note: webkitdirectory drag isn't widely supported on mobile, but handled gracefully
+  const dropped = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (dropped) handleZipUpload(dropped);
 });
 
 // ──────────────────────────────────────────────

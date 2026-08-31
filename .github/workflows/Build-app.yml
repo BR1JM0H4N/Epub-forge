@@ -1,0 +1,311 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "Build type"
+        required: true
+        default: "debug"
+        type: choice
+        options:
+          - debug
+          - release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # ============================================================
+      # NODE.JS
+      # ============================================================
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+
+      # ============================================================
+      # INSTALL DEPENDENCIES
+      # ============================================================
+      - name: Install dependencies
+        run: npm install
+
+
+      # ============================================================
+      # PREPARE STATIC WEBSITE
+      #
+      # Everything in the repository is copied to www/
+      # except files/directories belonging to the build system.
+      #
+      # Your website can therefore contain:
+      #
+      # HTML
+      # CSS
+      # JS
+      # JSON
+      # WASM
+      # ONNX
+      # images
+      # fonts
+      # videos
+      # etc.
+      # ============================================================
+      - name: Prepare web assets
+        run: |
+          rm -rf www
+          mkdir -p www
+
+          rsync -a \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='android/' \
+            --exclude='ios/' \
+            --exclude='node_modules/' \
+            --exclude='www/' \
+            --exclude='assets-icon/' \
+            --exclude='capacitor.config.*' \
+            --exclude='logo.png' \
+            --exclude='Build-app.yml' \
+            ./ www/
+
+          echo "=========================================="
+          echo "Website files copied to www/"
+          echo "=========================================="
+
+          find www -type f | sort
+
+
+          # --------------------------------------------------------
+          # Capacitor download bridge
+          # --------------------------------------------------------
+          cat > www/capacitor-download-bridge.js << 'SCRIPT_EOF'
+          (function () {
+            if (!window.Capacitor || !window.Capacitor.Plugins) return;
+
+            const { Filesystem } = window.Capacitor.Plugins;
+
+            if (!Filesystem) {
+              console.warn('Filesystem plugin missing');
+              return;
+            }
+
+            function blobUrlToBase64(blobUrl) {
+              return fetch(blobUrl)
+                .then(function (response) {
+                  return response.blob();
+                })
+                .then(function (blob) {
+                  return new Promise(function (resolve, reject) {
+                    const reader = new FileReader();
+
+                    reader.onloadend = function () {
+                      resolve(reader.result.split(',')[1]);
+                    };
+
+                    reader.onerror = reject;
+
+                    reader.readAsDataURL(blob);
+                  });
+                });
+            }
+
+            async function saveAndNotify(base64Data, filename) {
+              try {
+                await Filesystem.writeFile({
+                  path: 'Download/' + filename,
+                  data: base64Data,
+                  directory: 'DOCUMENTS',
+                  recursive: true
+                });
+
+                alert('Saved to Downloads: ' + filename);
+
+              } catch (error) {
+                console.error('Save failed:', error);
+                alert('Failed to save file: ' + error.message);
+              }
+            }
+
+            var originalClick = HTMLAnchorElement.prototype.click;
+
+            HTMLAnchorElement.prototype.click = function () {
+              var href = this.getAttribute('href');
+              var filename = this.getAttribute('download');
+
+              if (
+                href &&
+                href.indexOf('blob:') === 0 &&
+                filename
+              ) {
+                blobUrlToBase64(href)
+                  .then(function (base64) {
+                    saveAndNotify(base64, filename);
+                  });
+
+                return;
+              }
+
+              return originalClick.apply(this, arguments);
+            };
+          })();
+          SCRIPT_EOF
+
+
+          # --------------------------------------------------------
+          # Inject download bridge into index.html
+          # --------------------------------------------------------
+          if [ -f www/index.html ]; then
+            sed -i \
+              's#</body>#<script src="capacitor-download-bridge.js"></script></body>#' \
+              www/index.html
+          else
+            echo "ERROR: index.html was not found."
+            exit 1
+          fi
+
+
+      # ============================================================
+      # ADD ANDROID PLATFORM
+      # ============================================================
+      - name: Add Android platform
+        run: npx cap add android
+
+
+      # ============================================================
+      # STORAGE PERMISSION
+      # ============================================================
+      - name: Add storage permission
+        run: |
+          sed -i \
+            '/<manifest /a\    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />' \
+            android/app/src/main/AndroidManifest.xml
+
+
+      # ============================================================
+      # PREPARE APP ICON
+      #
+      # YOU PROVIDE:
+      #
+      #     logo.png
+      #
+      # Recommended:
+      #     2048x2048 or 4096x4096
+      #
+      # The workflow does NOT resize, crop, trim, recolor,
+      # or otherwise modify your logo.
+      #
+      # It simply gives the exact PNG to Capacitor Assets.
+      # ============================================================
+      - name: Prepare app icon
+        run: |
+          if [ ! -f logo.png ]; then
+            echo "ERROR: logo.png was not found in repository root."
+            echo ""
+            echo "Please add your finished HD app icon as:"
+            echo "    logo.png"
+            exit 1
+          fi
+
+          mkdir -p assets-icon
+
+          cp logo.png assets-icon/logo.png
+
+          echo "=========================================="
+          echo "App icon:"
+          echo "=========================================="
+
+          file assets-icon/logo.png
+
+
+      # ============================================================
+      # INSTALL CAPACITOR ASSETS
+      # ============================================================
+      - name: Install Capacitor Assets
+        run: |
+          npm install --save-dev @capacitor/assets
+
+
+      # ============================================================
+      # GENERATE ANDROID ICONS
+      #
+      # Capacitor Assets Easy Mode:
+      #
+      #     logo.png
+      #        ↓
+      #     Android launcher resources
+      #
+      # We provide explicit background colors so Capacitor can
+      # generate the adaptive icon background consistently.
+      # ============================================================
+      - name: Generate Android icons
+        run: |
+          npx @capacitor/assets generate \
+            --android \
+            --assetPath assets-icon \
+            --iconBackgroundColor "#FFFFFF" \
+            --iconBackgroundColorDark "#111111"
+
+
+      # ============================================================
+      # SYNC CAPACITOR
+      # ============================================================
+      - name: Sync Android project
+        run: |
+          npx cap sync android
+
+
+      # ============================================================
+      # JAVA 17
+      # ============================================================
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+
+      # ============================================================
+      # BUILD DEBUG APK
+      # ============================================================
+      - name: Build debug APK
+        if: ${{ inputs.build_type == 'debug' }}
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+
+      # ============================================================
+      # BUILD RELEASE APK
+      # ============================================================
+      - name: Build release APK
+        if: ${{ inputs.build_type == 'release' }}
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease
+
+
+      # ============================================================
+      # UPLOAD APK
+      # ============================================================
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ inputs.build_type }}
+
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/release/app-release-unsigned.apk
+
+          if-no-files-found: ignore

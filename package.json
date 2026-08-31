@@ -1,6 +1,6 @@
 {
   "name": "forge",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Epub Forge app",
   "scripts": {
     "sync": "cap sync android"

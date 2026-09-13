@@ -24,167 +24,135 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-
       # ============================================================
-      # NODE.JS
+      # NODE
       # ============================================================
-      - name: Set up Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-
-      # ============================================================
-      # INSTALL DEPENDENCIES
-      # ============================================================
-      - name: Install dependencies
+      - name: Install npm dependencies
         run: npm install
 
-
       # ============================================================
-      # PREPARE STATIC WEBSITE
+      # PREPARE WWW
       # ============================================================
-      - name: Prepare web assets
+      - name: Prepare www directory
+        shell: bash
         run: |
+          set -e
+
           rm -rf www
           mkdir -p www
 
-          rsync -a \
-            --exclude='.git/' \
-            --exclude='.github/' \
-            --exclude='android/' \
-            --exclude='ios/' \
-            --exclude='node_modules/' \
-            --exclude='www/' \
-            --exclude='assets-icon/' \
+          rsync -av \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='android' \
+            --exclude='ios' \
+            --exclude='node_modules' \
+            --exclude='www' \
+            --exclude='assets-icon' \
             --exclude='capacitor.config.*' \
             --exclude='logo.png' \
             --exclude='Build-app.yml' \
             ./ www/
 
-          echo "=========================================="
-          echo "Website files copied to www/"
-          echo "=========================================="
+      # ============================================================
+      # CAPACITOR DOWNLOAD BRIDGE
+      # ============================================================
+      - name: Add Capacitor download bridge
+        shell: bash
+        run: |
+          cat > www/capacitor-download-bridge.js <<'EOF'
+          (() => {
+            document.addEventListener("click", async (event) => {
+              const anchor = event.target.closest("a");
 
-          find www -type f | sort
+              if (!anchor) return;
 
+              const href = anchor.href;
 
-          # --------------------------------------------------------
-          # Capacitor download bridge
-          # --------------------------------------------------------
-          cat > www/capacitor-download-bridge.js << 'SCRIPT_EOF'
-          (function () {
-            if (!window.Capacitor || !window.Capacitor.Plugins) return;
+              if (!href || !href.startsWith("blob:")) return;
 
-            const { Filesystem } = window.Capacitor.Plugins;
+              event.preventDefault();
 
-            if (!Filesystem) {
-              console.warn('Filesystem plugin missing');
-              return;
-            }
-
-            function blobUrlToBase64(blobUrl) {
-              return fetch(blobUrl)
-                .then(function (response) {
-                  return response.blob();
-                })
-                .then(function (blob) {
-                  return new Promise(function (resolve, reject) {
-                    const reader = new FileReader();
-
-                    reader.onloadend = function () {
-                      resolve(reader.result.split(',')[1]);
-                    };
-
-                    reader.onerror = reject;
-
-                    reader.readAsDataURL(blob);
-                  });
-                });
-            }
-
-            async function saveAndNotify(base64Data, filename) {
               try {
-                await Filesystem.writeFile({
-                  path: 'Download/' + filename,
-                  data: base64Data,
-                  directory: 'DOCUMENTS',
-                  recursive: true
-                });
+                const response = await fetch(href);
+                const blob = await response.blob();
 
-                alert('Saved to Downloads: ' + filename);
+                const reader = new FileReader();
+
+                reader.onloadend = async () => {
+                  try {
+                    const base64 = reader.result.split(",")[1];
+
+                    if (
+                      window.Capacitor &&
+                      window.Capacitor.Plugins &&
+                      window.Capacitor.Plugins.Filesystem
+                    ) {
+                      const filename =
+                        anchor.download ||
+                        `download-${Date.now()}`;
+
+                      await window.Capacitor.Plugins.Filesystem.writeFile({
+                        path: filename,
+                        data: base64,
+                        directory: "DOCUMENTS",
+                        recursive: true
+                      });
+                    }
+                  } catch (error) {
+                    console.error(
+                      "Capacitor download failed:",
+                      error
+                    );
+                  }
+                };
+
+                reader.readAsDataURL(blob);
 
               } catch (error) {
-                console.error('Save failed:', error);
-                alert('Failed to save file: ' + error.message);
+                console.error(
+                  "Blob download failed:",
+                  error
+                );
               }
-            }
-
-            var originalClick = HTMLAnchorElement.prototype.click;
-
-            HTMLAnchorElement.prototype.click = function () {
-              var href = this.getAttribute('href');
-              var filename = this.getAttribute('download');
-
-              if (
-                href &&
-                href.indexOf('blob:') === 0 &&
-                filename
-              ) {
-                blobUrlToBase64(href)
-                  .then(function (base64) {
-                    saveAndNotify(base64, filename);
-                  });
-
-                return;
-              }
-
-              return originalClick.apply(this, arguments);
-            };
+            });
           })();
-          SCRIPT_EOF
-
+          EOF
 
       # ============================================================
-      # ADD ANDROID PLATFORM
+      # CAPACITOR ANDROID
       # ============================================================
-      - name: Add Android platform
+      - name: Add Capacitor Android
         run: npx cap add android
 
-
       # ============================================================
-      # DYNAMIC COLOR
-      # Material You / Android 12+
+      # MATERIAL 3 + DYNAMIC COLOR BRIDGE
       # ============================================================
       - name: Inject dynamic color bridge
+        shell: bash
         run: |
+          set -e
 
-          # --------------------------------------------------------
-          # 1. Add Material Components dependency
-          # --------------------------------------------------------
-          GRADLE_FILE=android/app/build.gradle
-
-          if [ ! -f "$GRADLE_FILE" ]; then
-            echo "ERROR: $GRADLE_FILE not found."
-            exit 1
-          fi
-
-          if ! grep -q "com.google.android.material:material" "$GRADLE_FILE"; then
-            sed -i \
-              "s#implementation project(':capacitor-android')#implementation project(':capacitor-android')\n    implementation 'com.google.android.material:material:1.12.0'#" \
-              "$GRADLE_FILE"
-
-            echo "Added Material Components dependency."
-          else
-            echo "Material Components dependency already present."
-          fi
-
-
-          # --------------------------------------------------------
-          # 2. Set Material 3 Dynamic Colors theme
-          # --------------------------------------------------------
+          GRADLE=android/app/build.gradle
           STYLES=android/app/src/main/res/values/styles.xml
 
+          # --------------------------------------------------------
+          # Add Material Components
+          # --------------------------------------------------------
+          if ! grep -q "com.google.android.material:material" "$GRADLE"; then
+            sed -i \
+              "/dependencies[[:space:]]*{/a\\    implementation 'com.google.android.material:material:1.12.0'" \
+              "$GRADLE"
+          fi
+
+          # --------------------------------------------------------
+          # Set Material 3 Dynamic Colors theme
+          # --------------------------------------------------------
           if [ -f "$STYLES" ]; then
             sed -i \
               's#parent="Theme\.AppCompat[^"]*"#parent="Theme.Material3.DynamicColors.DayNight.NoActionBar"#' \
@@ -196,54 +164,35 @@ jobs:
             echo "WARNING: styles.xml not found."
           fi
 
-
           # --------------------------------------------------------
-          # 2b. Force status/navigation bar to colorSurfaceContainerLowest
-          #     instead of the default colorPrimary
+          # Find MainActivity.java
           # --------------------------------------------------------
-          if [ -f "$STYLES" ]; then
-
-            sed -i \
-              '/<item name="android:statusBarColor">/d;/<item name="android:navigationBarColor">/d' \
-              "$STYLES"
-
-            sed -i \
-              '0,/<\/style>/s#</style>#    <item name="android:statusBarColor">?attr/colorSurfaceContainerLowest</item>\n    <item name="android:navigationBarColor">?attr/colorSurfaceContainerLowest</item>\n</style>#' \
-              "$STYLES"
-
-            echo "Patched status/navigation bar colors to colorSurfaceContainerLowest:"
-            cat "$STYLES"
-          fi
-
-          
-          echo "=========================================="
-          echo "DEBUG: Full styles.xml content"
-          echo "=========================================="
-          cat -A android/app/src/main/res/values/styles.xml | head -50
-
-          echo "=========================================="
-          echo "DEBUG: Activity theme in AndroidManifest.xml"
-          echo "=========================================="
-          grep -A 2 "<activity" android/app/src/main/AndroidManifest.xml
-
-          # --------------------------------------------------------
-          # 3. Patch MainActivity.java
-          #
-          # IMPORTANT:
-          # The WebView now PULLS the palette from Android.
-          # This removes the startup race caused by evaluateJavascript().
-          # --------------------------------------------------------
-          MAIN_ACTIVITY=$(find android/app/src/main/java -name "MainActivity.java" | head -n 1)
+          MAIN_ACTIVITY=$(find android/app/src/main/java \
+            -name "MainActivity.java" \
+            -type f | head -n 1)
 
           if [ -z "$MAIN_ACTIVITY" ]; then
             echo "ERROR: MainActivity.java not found."
             exit 1
           fi
 
-          PACKAGE_LINE=$(grep '^package ' "$MAIN_ACTIVITY")
+          echo "MainActivity: $MAIN_ACTIVITY"
 
-          cat > "$MAIN_ACTIVITY" << JAVA_EOF
-          $PACKAGE_LINE
+          # --------------------------------------------------------
+          # Preserve package declaration
+          # --------------------------------------------------------
+          PACKAGE=$(grep '^package ' "$MAIN_ACTIVITY" | head -n 1)
+
+          if [ -z "$PACKAGE" ]; then
+            echo "ERROR: Package declaration not found."
+            exit 1
+          fi
+
+          # --------------------------------------------------------
+          # Rewrite MainActivity.java
+          # --------------------------------------------------------
+          cat > "$MAIN_ACTIVITY" <<EOF
+          $PACKAGE
 
           import android.os.Bundle;
           import android.webkit.JavascriptInterface;
@@ -258,301 +207,354 @@ jobs:
 
               @Override
               public void onCreate(Bundle savedInstanceState) {
-
-                  // Apply Android 12+ Material You colors
-                  // before normal Activity theme inflation.
                   DynamicColors.applyToActivityIfAvailable(this);
 
                   super.onCreate(savedInstanceState);
 
-                  // Expose the resolved Material palette to JavaScript.
-                  WebView webView = bridge.getWebView();
+                  // ------------------------------------------------
+                  // Use Material 3 Surface Container Lowest for
+                  // Android status and navigation bars.
+                  // ------------------------------------------------
+                  int surfaceLowest = MaterialColors.getColor(
+                          this,
+                          R.attr.colorSurfaceContainerLowest,
+                          0xFFFFFFFF
+                  );
+
+                  getWindow().setStatusBarColor(surfaceLowest);
+                  getWindow().setNavigationBarColor(surfaceLowest);
+
+                  WebView webView = getBridge().getWebView();
 
                   webView.addJavascriptInterface(
-                      new DynamicColorJavascriptInterface(),
-                      "DynamicColorBridge"
+                          new DynamicColorBridge(),
+                          "DynamicColorBridge"
                   );
               }
 
-              private class DynamicColorJavascriptInterface {
+              public class DynamicColorBridge {
 
                   @JavascriptInterface
                   public String getPalette() {
-                      return buildPaletteJson();
-                  }
-              }
 
-              private int resolveColor(int attr, int fallback) {
-                  return MaterialColors.getColor(this, attr, fallback);
-              }
-
-              private String hex(int color) {
-                  return String.format("#%06X", 0xFFFFFF & color);
-              }
-
-              private String buildPaletteJson() {
-
-                  int[][] palette = {
-
-                      { R.attr.colorPrimary,                 0 },
-                      { R.attr.colorOnPrimary,               0 },
-                      { R.attr.colorPrimaryContainer,       0 },
-                      { R.attr.colorOnPrimaryContainer,     0 },
-
-                      { R.attr.colorSecondary,               0 },
-                      { R.attr.colorOnSecondary,             0 },
-                      { R.attr.colorSecondaryContainer,      0 },
-                      { R.attr.colorOnSecondaryContainer,    0 },
-
-                      { R.attr.colorTertiary,                 0 },
-                      { R.attr.colorOnTertiary,               0 },
-                      { R.attr.colorTertiaryContainer,       0 },
-                      { R.attr.colorOnTertiaryContainer,     0 },
-
-                      { R.attr.colorError,                    0 },
-                      { R.attr.colorOnError,                  0 },
-                      { R.attr.colorErrorContainer,           0 },
-                      { R.attr.colorOnErrorContainer,         0 },
-
-                      { R.attr.colorSurface,                  0 },
-                      { R.attr.colorOnSurface,                0 },
-                      { R.attr.colorSurfaceVariant,          0 },
-                      { R.attr.colorOnSurfaceVariant,        0 },
-
-                      { R.attr.colorSurfaceContainerLowest,   0 },
-                      { R.attr.colorSurfaceContainerLow,       0 },
-                      { R.attr.colorSurfaceContainer,          0 },
-                      { R.attr.colorSurfaceContainerHigh,     0 },
-                      { R.attr.colorSurfaceContainerHighest,  0 },
-
-                      { R.attr.colorSurfaceDim,               0 },
-                      { R.attr.colorSurfaceBright,            0 },
-
-                      { R.attr.colorOutline,                  0 },
-                      { R.attr.colorOutlineVariant,           0 }
-                  };
-
-                  String[] keys = {
-
-                      "primary",
-                      "onPrimary",
-                      "primaryContainer",
-                      "onPrimaryContainer",
-
-                      "secondary",
-                      "onSecondary",
-                      "secondaryContainer",
-                      "onSecondaryContainer",
-
-                      "tertiary",
-                      "onTertiary",
-                      "tertiaryContainer",
-                      "onTertiaryContainer",
-
-                      "error",
-                      "onError",
-                      "errorContainer",
-                      "onErrorContainer",
-
-                      "surface",
-                      "onSurface",
-                      "surfaceVariant",
-                      "onSurfaceVariant",
-
-                      "surfaceContainerLowest",
-                      "surfaceContainerLow",
-                      "surfaceContainer",
-                      "surfaceContainerHigh",
-                      "surfaceContainerHighest",
-
-                      "surfaceDim",
-                      "surfaceBright",
-
-                      "outline",
-                      "outlineVariant"
-                  };
-
-                  StringBuilder sb = new StringBuilder("{");
-
-                  for (int i = 0; i < palette.length; i++) {
-
-                      int color = resolveColor(
-                          palette[i][0],
-                          0xFF6750A4
+                      int primary = resolveColor(
+                              R.attr.colorPrimary
                       );
 
-                      sb.append("\"")
-                        .append(keys[i])
-                        .append("\":\"")
-                        .append(hex(color))
-                        .append("\"");
+                      int onPrimary = resolveColor(
+                              R.attr.colorOnPrimary
+                      );
 
-                      if (i < palette.length - 1) {
-                          sb.append(",");
-                      }
+                      int primaryContainer = resolveColor(
+                              R.attr.colorPrimaryContainer
+                      );
+
+                      int onPrimaryContainer = resolveColor(
+                              R.attr.colorOnPrimaryContainer
+                      );
+
+                      int secondary = resolveColor(
+                              R.attr.colorSecondary
+                      );
+
+                      int onSecondary = resolveColor(
+                              R.attr.colorOnSecondary
+                      );
+
+                      int secondaryContainer = resolveColor(
+                              R.attr.colorSecondaryContainer
+                      );
+
+                      int onSecondaryContainer = resolveColor(
+                              R.attr.colorOnSecondaryContainer
+                      );
+
+                      int tertiary = resolveColor(
+                              R.attr.colorTertiary
+                      );
+
+                      int onTertiary = resolveColor(
+                              R.attr.colorOnTertiary
+                      );
+
+                      int tertiaryContainer = resolveColor(
+                              R.attr.colorTertiaryContainer
+                      );
+
+                      int onTertiaryContainer = resolveColor(
+                              R.attr.colorOnTertiaryContainer
+                      );
+
+                      int error = resolveColor(
+                              R.attr.colorError
+                      );
+
+                      int onError = resolveColor(
+                              R.attr.colorOnError
+                      );
+
+                      int errorContainer = resolveColor(
+                              R.attr.colorErrorContainer
+                      );
+
+                      int onErrorContainer = resolveColor(
+                              R.attr.colorOnErrorContainer
+                      );
+
+                      int background = resolveColor(
+                              R.attr.colorBackground
+                      );
+
+                      int onBackground = resolveColor(
+                              R.attr.colorOnBackground
+                      );
+
+                      int surface = resolveColor(
+                              R.attr.colorSurface
+                      );
+
+                      int onSurface = resolveColor(
+                              R.attr.colorOnSurface
+                      );
+
+                      int surfaceVariant = resolveColor(
+                              R.attr.colorSurfaceVariant
+                      );
+
+                      int onSurfaceVariant = resolveColor(
+                              R.attr.colorOnSurfaceVariant
+                      );
+
+                      int surfaceContainerLowest = resolveColor(
+                              R.attr.colorSurfaceContainerLowest
+                      );
+
+                      int surfaceContainerLow = resolveColor(
+                              R.attr.colorSurfaceContainerLow
+                      );
+
+                      int surfaceContainer = resolveColor(
+                              R.attr.colorSurfaceContainer
+                      );
+
+                      int surfaceContainerHigh = resolveColor(
+                              R.attr.colorSurfaceContainerHigh
+                      );
+
+                      int surfaceContainerHighest = resolveColor(
+                              R.attr.colorSurfaceContainerHighest
+                      );
+
+                      int surfaceDim = resolveColor(
+                              R.attr.colorSurfaceDim
+                      );
+
+                      int surfaceBright = resolveColor(
+                              R.attr.colorSurfaceBright
+                      );
+
+                      int outline = resolveColor(
+                              R.attr.colorOutline
+                      );
+
+                      int outlineVariant = resolveColor(
+                              R.attr.colorOutlineVariant
+                      );
+
+                      return "{"
+                              + "\\\"primary\\\":\\\"" + colorToHex(primary) + "\\\","
+                              + "\\\"onPrimary\\\":\\\"" + colorToHex(onPrimary) + "\\\","
+                              + "\\\"primaryContainer\\\":\\\"" + colorToHex(primaryContainer) + "\\\","
+                              + "\\\"onPrimaryContainer\\\":\\\"" + colorToHex(onPrimaryContainer) + "\\\","
+                              + "\\\"secondary\\\":\\\"" + colorToHex(secondary) + "\\\","
+                              + "\\\"onSecondary\\\":\\\"" + colorToHex(onSecondary) + "\\\","
+                              + "\\\"secondaryContainer\\\":\\\"" + colorToHex(secondaryContainer) + "\\\","
+                              + "\\\"onSecondaryContainer\\\":\\\"" + colorToHex(onSecondaryContainer) + "\\\","
+                              + "\\\"tertiary\\\":\\\"" + colorToHex(tertiary) + "\\\","
+                              + "\\\"onTertiary\\\":\\\"" + colorToHex(onTertiary) + "\\\","
+                              + "\\\"tertiaryContainer\\\":\\\"" + colorToHex(tertiaryContainer) + "\\\","
+                              + "\\\"onTertiaryContainer\\\":\\\"" + colorToHex(onTertiaryContainer) + "\\\","
+                              + "\\\"error\\\":\\\"" + colorToHex(error) + "\\\","
+                              + "\\\"onError\\\":\\\"" + colorToHex(onError) + "\\\","
+                              + "\\\"errorContainer\\\":\\\"" + colorToHex(errorContainer) + "\\\","
+                              + "\\\"onErrorContainer\\\":\\\"" + colorToHex(onErrorContainer) + "\\\","
+                              + "\\\"background\\\":\\\"" + colorToHex(background) + "\\\","
+                              + "\\\"onBackground\\\":\\\"" + colorToHex(onBackground) + "\\\","
+                              + "\\\"surface\\\":\\\"" + colorToHex(surface) + "\\\","
+                              + "\\\"onSurface\\\":\\\"" + colorToHex(onSurface) + "\\\","
+                              + "\\\"surfaceVariant\\\":\\\"" + colorToHex(surfaceVariant) + "\\\","
+                              + "\\\"onSurfaceVariant\\\":\\\"" + colorToHex(onSurfaceVariant) + "\\\","
+                              + "\\\"surfaceContainerLowest\\\":\\\"" + colorToHex(surfaceContainerLowest) + "\\\","
+                              + "\\\"surfaceContainerLow\\\":\\\"" + colorToHex(surfaceContainerLow) + "\\\","
+                              + "\\\"surfaceContainer\\\":\\\"" + colorToHex(surfaceContainer) + "\\\","
+                              + "\\\"surfaceContainerHigh\\\":\\\"" + colorToHex(surfaceContainerHigh) + "\\\","
+                              + "\\\"surfaceContainerHighest\\\":\\\"" + colorToHex(surfaceContainerHighest) + "\\\","
+                              + "\\\"surfaceDim\\\":\\\"" + colorToHex(surfaceDim) + "\\\","
+                              + "\\\"surfaceBright\\\":\\\"" + colorToHex(surfaceBright) + "\\\","
+                              + "\\\"outline\\\":\\\"" + colorToHex(outline) + "\\\","
+                              + "\\\"outlineVariant\\\":\\\"" + colorToHex(outlineVariant) + "\\\""
+                              + "}";
                   }
 
-                  sb.append("}");
+                  private int resolveColor(int attr) {
+                      return MaterialColors.getColor(
+                              MainActivity.this,
+                              attr,
+                              0xFFFFFFFF
+                      );
+                  }
 
-                  return sb.toString();
+                  private String colorToHex(int color) {
+                      return String.format(
+                              "#%06X",
+                              (0xFFFFFF & color)
+                      );
+                  }
               }
           }
-          JAVA_EOF
-
-          echo "=========================================="
-          echo "MainActivity.java patched"
-          echo "=========================================="
-          cat "$MAIN_ACTIVITY"
-
+          EOF
 
           # --------------------------------------------------------
-          # 4. Create dynamic color JavaScript bridge
-          #
-          # Loaded in <head>, and pulls the palette directly from
-          # the Android JavascriptInterface.
+          # Web dynamic color bridge
           # --------------------------------------------------------
-          cat > www/dynamic-color-bridge.js << 'SCRIPT_EOF'
-          (function () {
+          cat > www/dynamic-color-bridge.js <<'EOF'
+          (() => {
+            function applyDynamicColors() {
+              try {
+                if (
+                  !window.DynamicColorBridge ||
+                  !window.DynamicColorBridge.getPalette
+                ) {
+                  return false;
+                }
 
-            function apply(palette) {
-              if (!palette) return;
+                const palette =
+                  JSON.parse(
+                    window.DynamicColorBridge.getPalette()
+                  );
 
-              window.__dynamicColors = palette;
-
-              Object.entries(palette).forEach(function (entry) {
-                document.documentElement.style.setProperty(
-                  '--md-' + entry[0],
-                  entry[1]
-                );
-              });
-
-              document.documentElement.classList.add(
-                'dynamic-colors-ready'
-              );
-
-              document.dispatchEvent(
-                new CustomEvent('dynamic-colors-ready', {
-                  detail: palette
-                })
-              );
-            }
-
-
-            function loadDynamicColors() {
-
-              if (
-                window.DynamicColorBridge &&
-                typeof window.DynamicColorBridge.getPalette === 'function'
-              ) {
-
-                try {
-
-                  var json =
-                    window.DynamicColorBridge.getPalette();
-
-                  if (json) {
-                    apply(JSON.parse(json));
-                    return true;
-                  }
-
-                } catch (error) {
-
-                  console.error(
-                    'Dynamic color bridge failed:',
-                    error
+                for (const [key, value] of Object.entries(palette)) {
+                  document.documentElement.style.setProperty(
+                    `--md-${key.replace(/[A-Z]/g, m => "-" + m.toLowerCase())}`,
+                    value
                   );
                 }
+
+                document.documentElement.classList.add(
+                  "dynamic-colors-ready"
+                );
+
+                window.dispatchEvent(
+                  new CustomEvent("dynamic-colors-ready", {
+                    detail: palette
+                  })
+                );
+
+                return true;
+
+              } catch (error) {
+                console.error(
+                  "Dynamic color bridge error:",
+                  error
+                );
+
+                return false;
               }
-
-              return false;
             }
 
+            let attempts = 0;
 
-            // Try immediately.
-            if (!loadDynamicColors()) {
+            function tryApply() {
+              if (applyDynamicColors()) return;
 
-              // Defensive retry during WebView initialization.
-              var attempts = 0;
+              attempts++;
 
-              var timer = setInterval(function () {
-
-                attempts++;
-
-                if (
-                  loadDynamicColors() ||
-                  attempts >= 100
-                ) {
-                  clearInterval(timer);
-                }
-
-              }, 20);
+              if (attempts < 100) {
+                setTimeout(tryApply, 20);
+              }
             }
 
+            tryApply();
           })();
-          SCRIPT_EOF
-
+          EOF
 
           # --------------------------------------------------------
-          # 5. Inject dynamic color bridge into HEAD
+          # Inject bridge into index.html
           # --------------------------------------------------------
-          if [ -f www/index.html ]; then
+          if [ -f "www/index.html" ]; then
+            python3 - <<'PY'
+          from pathlib import Path
 
-            sed -i \
-              's#</head>#<script src="dynamic-color-bridge.js"></script></head>#' \
-              www/index.html
+          path = Path("www/index.html")
+          text = path.read_text()
 
-          else
-            echo "ERROR: index.html not found."
-            exit 1
+          script = '<script src="dynamic-color-bridge.js"></script>'
+
+          if script not in text:
+              text = text.replace(
+                  "</head>",
+                  f"  {script}\n</head>",
+                  1
+              )
+
+          path.write_text(text)
+          PY
           fi
-
 
       # ============================================================
       # STORAGE PERMISSION
       # ============================================================
       - name: Add storage permission
+        shell: bash
         run: |
-          sed -i \
-            '/<manifest /a\    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />' \
-            android/app/src/main/AndroidManifest.xml
+          MANIFEST=android/app/src/main/AndroidManifest.xml
 
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("android/app/src/main/AndroidManifest.xml")
+          text = path.read_text()
+
+          permission = (
+              '<uses-permission '
+              'android:name="android.permission.WRITE_EXTERNAL_STORAGE" '
+              'android:maxSdkVersion="32" />'
+          )
+
+          if permission not in text:
+              text = text.replace(
+                  "<application",
+                  permission + "\n\n    <application",
+                  1
+              )
+
+          path.write_text(text)
+          PY
 
       # ============================================================
-      # PREPARE APP ICON
+      # PREPARE ICON
       # ============================================================
       - name: Prepare app icon
+        shell: bash
         run: |
+          set -e
 
-          if [ ! -f logo.png ]; then
-            echo "ERROR: logo.png was not found in repository root."
-            echo ""
-            echo "Please add your finished HD app icon as:"
-            echo "    logo.png"
+          if [ ! -f "logo.png" ]; then
+            echo "ERROR: logo.png not found in repository root."
             exit 1
           fi
 
+          rm -rf assets-icon
           mkdir -p assets-icon
 
           cp logo.png assets-icon/logo.png
 
-          echo "=========================================="
-          echo "App icon:"
-          echo "=========================================="
-
-          file assets-icon/logo.png
-
-
       # ============================================================
-      # INSTALL CAPACITOR ASSETS
+      # CAPACITOR ASSETS
       # ============================================================
       - name: Install Capacitor Assets
-        run: |
-          npm install --save-dev @capacitor/assets
+        run: npm install --save-dev @capacitor/assets
 
-
-      # ============================================================
-      # GENERATE ANDROID ICONS
-      # ============================================================
       - name: Generate Android icons
         run: |
           npx @capacitor/assets generate \
@@ -561,57 +563,52 @@ jobs:
             --iconBackgroundColor "#FFFFFF" \
             --iconBackgroundColorDark "#111111"
 
+      # ============================================================
+      # CAPACITOR SYNC
+      # ============================================================
+      - name: Sync Capacitor
+        run: npx cap sync android
 
       # ============================================================
-      # SYNC CAPACITOR
+      # JAVA
       # ============================================================
-      - name: Sync Android project
-        run: |
-          npx cap sync android
-
-
-      # ============================================================
-      # JAVA 17
-      # ============================================================
-      - name: Set up JDK
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-
       # ============================================================
-      # BUILD DEBUG APK
+      # BUILD
       # ============================================================
-      - name: Build debug APK
-        if: ${{ inputs.build_type == 'debug' }}
+      - name: Build APK
         working-directory: android
+        shell: bash
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug
 
-
-      # ============================================================
-      # BUILD RELEASE APK
-      # ============================================================
-      - name: Build release APK
-        if: ${{ inputs.build_type == 'release' }}
-        working-directory: android
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleRelease
-
+          if [ "${{ inputs.build_type }}" = "release" ]; then
+            ./gradlew assembleRelease
+          else
+            ./gradlew assembleDebug
+          fi
 
       # ============================================================
-      # UPLOAD APK
+      # UPLOAD DEBUG
       # ============================================================
-      - name: Upload APK
+      - name: Upload Debug APK
+        if: inputs.build_type == 'debug'
         uses: actions/upload-artifact@v4
         with:
-          name: app-${{ inputs.build_type }}
+          name: app-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
 
-          path: |
-            android/app/build/outputs/apk/debug/app-debug.apk
-            android/app/build/outputs/apk/release/app-release-unsigned.apk
-
-          if-no-files-found: ignore
+      # ============================================================
+      # UPLOAD RELEASE
+      # ============================================================
+      - name: Upload Release APK
+        if: inputs.build_type == 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: android/app/build/outputs/apk/release/app-release.apk

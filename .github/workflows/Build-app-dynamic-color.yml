@@ -1,4 +1,4 @@
-name: Build APK
+name: Build APK v3
 
 on:
   workflow_dispatch:
@@ -24,7 +24,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-
       # ============================================================
       # NODE.JS
       # ============================================================
@@ -33,32 +32,14 @@ jobs:
         with:
           node-version: 20
 
-
       # ============================================================
       # INSTALL DEPENDENCIES
       # ============================================================
       - name: Install dependencies
         run: npm install
 
-
       # ============================================================
       # PREPARE STATIC WEBSITE
-      #
-      # Everything in the repository is copied to www/
-      # except files/directories belonging to the build system.
-      #
-      # Your website can therefore contain:
-      #
-      # HTML
-      # CSS
-      # JS
-      # JSON
-      # WASM
-      # ONNX
-      # images
-      # fonts
-      # videos
-      # etc.
       # ============================================================
       - name: Prepare web assets
         run: |
@@ -84,10 +65,9 @@ jobs:
 
           find www -type f | sort
 
-
-          # --------------------------------------------------------
-          # Capacitor download bridge
-          # --------------------------------------------------------
+          # ========================================================
+          # CAPACITOR DOWNLOAD BRIDGE
+          # ========================================================
           cat > www/capacitor-download-bridge.js << 'SCRIPT_EOF'
           (function () {
             if (!window.Capacitor || !window.Capacitor.Plugins) return;
@@ -160,51 +140,21 @@ jobs:
           })();
           SCRIPT_EOF
 
-
-          # --------------------------------------------------------
-          # Inject download bridge into index.html
-          # --------------------------------------------------------
-          if [ -f www/index.html ]; then
-            sed -i \
-              's#</body>#<script src="capacitor-download-bridge.js"></script></body>#' \
-              www/index.html
-          else
-            echo "ERROR: index.html was not found."
-            exit 1
-          fi
-
-
       # ============================================================
       # ADD ANDROID PLATFORM
       # ============================================================
       - name: Add Android platform
         run: npx cap add android
 
-
       # ============================================================
-      # DYNAMIC COLOR (Material You / Android 12+)
-      #
-      # 1. Adds the Material Components library dependency (not
-      #    present in Capacitor's default template).
-      # 2. Sets the app theme parent to the official Material3
-      #    DynamicColors DayNight theme. Material Components uses
-      #    this theme's dynamic-color overlay on Android 12+.
-      # 3. Calls DynamicColors.applyToActivityIfAvailable(this)
-      #    before super.onCreate(), ensuring the dynamic theme is
-      #    applied before the Activity/WebView is created.
-      # 4. Reads the resolved Material3 color-role attributes from
-      #    com.google.android.material.R.attr and pushes the full
-      #    resolved palette into the WebView as
-      #    window.__dynamicColors / CSS variables.
-      #
-      # Falls back harmlessly on API < 31 (colors just won't be
-      # Material-You-derived, no crash).
+      # DYNAMIC COLOR + EDGE-TO-EDGE
       # ============================================================
-      - name: Inject dynamic color bridge
+      - name: Inject dynamic color and edge-to-edge support
         run: |
-          # --------------------------------------------------------
-          # 1. Add Material Components dependency to app/build.gradle
-          # --------------------------------------------------------
+
+          # ========================================================
+          # GRADLE DEPENDENCIES
+          # ========================================================
           GRADLE_FILE=android/app/build.gradle
 
           if [ ! -f "$GRADLE_FILE" ]; then
@@ -212,135 +162,223 @@ jobs:
             exit 1
           fi
 
+          # Material Components
           if ! grep -q "com.google.android.material:material" "$GRADLE_FILE"; then
             sed -i \
               "s#implementation project(':capacitor-android')#implementation project(':capacitor-android')\n    implementation 'com.google.android.material:material:1.12.0'#" \
               "$GRADLE_FILE"
-            echo "Added Material Components dependency to $GRADLE_FILE"
+
+            echo "Added Material Components dependency."
           else
-            echo "Material Components dependency already present, skipping."
+            echo "Material Components dependency already present."
           fi
 
-          cat "$GRADLE_FILE"
+          # AndroidX Core for WindowCompat / Edge-to-Edge
+          if ! grep -q "androidx.core:core:" "$GRADLE_FILE"; then
+            sed -i \
+              "s#implementation project(':capacitor-android')#implementation project(':capacitor-android')\n    implementation 'androidx.core:core:1.16.0'#" \
+              "$GRADLE_FILE"
 
+            echo "Added AndroidX Core dependency."
+          else
+            echo "AndroidX Core dependency already present."
+          fi
 
-          # --------------------------------------------------------
-          # 2. Set theme parent to a real Material3 style
-          # --------------------------------------------------------
+          # ========================================================
+          # MATERIAL 3 DYNAMIC COLORS THEME
+          # ========================================================
           STYLES=android/app/src/main/res/values/styles.xml
 
           if [ -f "$STYLES" ]; then
+
             sed -i \
               's#parent="Theme\.AppCompat[^"]*"#parent="Theme.Material3.DynamicColors.DayNight.NoActionBar"#' \
               "$STYLES"
-            echo "Patched theme parent in $STYLES"
+
+            echo "Patched Material 3 theme:"
             cat "$STYLES"
+
           else
-            echo "WARNING: styles.xml not found at expected path, skipping theme patch."
+            echo "WARNING: styles.xml not found."
           fi
 
-
-          # --------------------------------------------------------
-          # 3 & 4. Patch MainActivity.java
-          # --------------------------------------------------------
-          MAIN_ACTIVITY=$(find android/app/src/main/java -name "MainActivity.java")
+          # ========================================================
+          # PATCH MAIN ACTIVITY
+          # ========================================================
+          MAIN_ACTIVITY=$(find android/app/src/main/java -name "MainActivity.java" | head -n 1)
 
           if [ -z "$MAIN_ACTIVITY" ]; then
             echo "ERROR: MainActivity.java not found."
             exit 1
           fi
 
-          echo "Patching $MAIN_ACTIVITY"
-
           PACKAGE_LINE=$(grep '^package ' "$MAIN_ACTIVITY")
 
           cat > "$MAIN_ACTIVITY" << JAVA_EOF
           $PACKAGE_LINE
 
+          import android.graphics.Color;
           import android.os.Bundle;
+          import android.view.View;
+          import android.view.Window;
+          import android.webkit.JavascriptInterface;
+          import android.webkit.WebView;
+
+          import androidx.core.graphics.Insets;
+          import androidx.core.view.ViewCompat;
+          import androidx.core.view.WindowCompat;
+          import androidx.core.view.WindowInsetsCompat;
+
           import com.getcapacitor.BridgeActivity;
           import com.google.android.material.color.DynamicColors;
           import com.google.android.material.color.MaterialColors;
           import com.google.android.material.R;
 
           public class MainActivity extends BridgeActivity {
+
               @Override
               public void onCreate(Bundle savedInstanceState) {
-                  // Apply Android 12+ wallpaper/system dynamic colors
-                  // before the Activity's normal theme inflation.
+
+                  // ==================================================
+                  // MATERIAL YOU / DYNAMIC COLORS
+                  // ==================================================
                   DynamicColors.applyToActivityIfAvailable(this);
 
                   super.onCreate(savedInstanceState);
 
-                  bridge.getWebView().post(() -> {
-                      String js = "window.__dynamicColors = " + buildPaletteJson() + ";"
-                          + "document.dispatchEvent(new CustomEvent('dynamic-colors-ready',"
-                          + "{ detail: window.__dynamicColors }));";
-                      bridge.getWebView().evaluateJavascript(js, null);
-                  });
+                  // ==================================================
+                  // ANDROID EDGE-TO-EDGE
+                  // ==================================================
+                  Window window = getWindow();
+
+                  WindowCompat.enableEdgeToEdge(window);
+
+                  // Keep navigation bar transparent in gesture mode
+                  // and remove the automatic contrast scrim where
+                  // supported.
+                  if (android.os.Build.VERSION.SDK_INT >= 29) {
+                      window.setNavigationBarContrastEnforced(false);
+                  }
+
+                  // ==================================================
+                  // CAPACITOR WEBVIEW
+                  // ==================================================
+                  WebView webView = bridge.getWebView();
+
+                  // ==================================================
+                  // HANDLE SYSTEM BAR INSETS
+                  //
+                  // The WebView itself remains edge-to-edge.
+                  // Interactive page content receives safe padding
+                  // so buttons/text are not hidden behind system bars.
+                  // ==================================================
+                  ViewCompat.setOnApplyWindowInsetsListener(
+                      webView,
+                      (view, windowInsets) -> {
+
+                          Insets systemBars =
+                              windowInsets.getInsets(
+                                  WindowInsetsCompat.Type.systemBars()
+                              );
+
+                          view.setPadding(
+                              0,
+                              systemBars.top,
+                              0,
+                              systemBars.bottom
+                          );
+
+                          return windowInsets;
+                      }
+                  );
+
+                  ViewCompat.requestApplyInsets(webView);
+
+                  // ==================================================
+                  // DYNAMIC COLOR JAVASCRIPT BRIDGE
+                  // ==================================================
+                  webView.addJavascriptInterface(
+                      new DynamicColorJavascriptInterface(),
+                      "DynamicColorBridge"
+                  );
               }
 
+              // ======================================================
+              // JAVASCRIPT INTERFACE
+              // ======================================================
+              private class DynamicColorJavascriptInterface {
+
+                  @JavascriptInterface
+                  public String getPalette() {
+                      return buildPaletteJson();
+                  }
+              }
+
+              // ======================================================
+              // COLOR RESOLUTION
+              // ======================================================
               private int resolveColor(int attr, int fallback) {
-                  return MaterialColors.getColor(this, attr, fallback);
+                  return MaterialColors.getColor(
+                      this,
+                      attr,
+                      fallback
+                  );
               }
 
               private String hex(int color) {
-                  return String.format("#%06X", 0xFFFFFF & color);
+                  return String.format(
+                      "#%06X",
+                      0xFFFFFF & color
+                  );
               }
 
+              // ======================================================
+              // BUILD MATERIAL YOU PALETTE
+              // ======================================================
               private String buildPaletteJson() {
-                  /*
-                   * IMPORTANT:
-                   * Use Material Components attributes, NOT android.R.attr.*.
-                   *
-                   * MaterialColors.getColor() also correctly resolves color
-                   * resources referenced by the Material theme, including
-                   * dynamic resource overrides on Android 12+.
-                   */
+
                   int[][] palette = {
-                      { R.attr.colorPrimary,              0 },
-                      { R.attr.colorOnPrimary,             0 },
-                      { R.attr.colorPrimaryContainer,     0 },
-                      { R.attr.colorOnPrimaryContainer,   0 },
 
-                      { R.attr.colorSecondary,             0 },
-                      { R.attr.colorOnSecondary,           0 },
-                      { R.attr.colorSecondaryContainer,   0 },
-                      { R.attr.colorOnSecondaryContainer, 0 },
+                      { R.attr.colorPrimary,                 0 },
+                      { R.attr.colorOnPrimary,               0 },
+                      { R.attr.colorPrimaryContainer,       0 },
+                      { R.attr.colorOnPrimaryContainer,     0 },
 
-                      { R.attr.colorTertiary,             0 },
-                      { R.attr.colorOnTertiary,            0 },
-                      { R.attr.colorTertiaryContainer,    0 },
-                      { R.attr.colorOnTertiaryContainer,  0 },
+                      { R.attr.colorSecondary,               0 },
+                      { R.attr.colorOnSecondary,             0 },
+                      { R.attr.colorSecondaryContainer,      0 },
+                      { R.attr.colorOnSecondaryContainer,    0 },
 
-                      { R.attr.colorError,                 0 },
-                      { R.attr.colorOnError,               0 },
-                      { R.attr.colorErrorContainer,        0 },
-                      { R.attr.colorOnErrorContainer,      0 },
+                      { R.attr.colorTertiary,                 0 },
+                      { R.attr.colorOnTertiary,               0 },
+                      { R.attr.colorTertiaryContainer,       0 },
+                      { R.attr.colorOnTertiaryContainer,     0 },
 
-                      { R.attr.colorSurface,               0 },
-                      { R.attr.colorOnSurface,             0 },
-                      { R.attr.colorSurfaceVariant,       0 },
-                      { R.attr.colorOnSurfaceVariant,     0 },
+                      { R.attr.colorError,                    0 },
+                      { R.attr.colorOnError,                  0 },
+                      { R.attr.colorErrorContainer,           0 },
+                      { R.attr.colorOnErrorContainer,         0 },
 
-                      { R.attr.colorSurfaceContainerLowest, 0 },
+                      { R.attr.colorSurface,                  0 },
+                      { R.attr.colorOnSurface,                0 },
+                      { R.attr.colorSurfaceVariant,          0 },
+                      { R.attr.colorOnSurfaceVariant,        0 },
+
+                      { R.attr.colorSurfaceContainerLowest,   0 },
                       { R.attr.colorSurfaceContainerLow,     0 },
                       { R.attr.colorSurfaceContainer,        0 },
                       { R.attr.colorSurfaceContainerHigh,   0 },
                       { R.attr.colorSurfaceContainerHighest,0 },
 
-                      { R.attr.colorSurfaceDim,           0 },
-                      { R.attr.colorSurfaceBright,         0 },
+                      { R.attr.colorSurfaceDim,               0 },
+                      { R.attr.colorSurfaceBright,            0 },
 
-                      { R.attr.colorOutline,               0 },
-                      { R.attr.colorOutlineVariant,        0 },
-
-                      /* Inverse color roles are intentionally omitted:
-                       * Material Components 1.12.0 does not expose them
-                       * as R.attr fields. */
+                      { R.attr.colorOutline,                  0 },
+                      { R.attr.colorOutlineVariant,           0 }
                   };
 
                   String[] keys = {
+
                       "primary",
                       "onPrimary",
                       "primaryContainer",
@@ -376,14 +414,19 @@ jobs:
                       "surfaceBright",
 
                       "outline",
-                      "outlineVariant",
+                      "outlineVariant"
+                  };
 
-                      /* inverse roles unavailable in Material 1.12.0 */                  };
-
-                  StringBuilder sb = new StringBuilder("{");
+                  StringBuilder sb =
+                      new StringBuilder("{");
 
                   for (int i = 0; i < palette.length; i++) {
-                      int color = resolveColor(palette[i][0], 0xFF6750A4);
+
+                      int color = resolveColor(
+                          palette[i][0],
+                          0xFF6750A4
+                      );
+
                       sb.append("\"")
                         .append(keys[i])
                         .append("\":\"")
@@ -396,47 +439,112 @@ jobs:
                   }
 
                   sb.append("}");
+
                   return sb.toString();
               }
           }
           JAVA_EOF
 
           echo "=========================================="
-          echo "MainActivity.java patched:"
+          echo "MainActivity.java patched"
           echo "=========================================="
+
           cat "$MAIN_ACTIVITY"
 
-
-          # --------------------------------------------------------
-          # JS listener injected into www/ (already prepared earlier).
-          # Every Material 3 role becomes a CSS variable such as
-          # --md-primary, --md-surface-container, --md-on-surface, etc.
-          # --------------------------------------------------------
+          # ========================================================
+          # DYNAMIC COLOR JAVASCRIPT BRIDGE
+          #
+          # UNCHANGED FROM WORKING VERSION
+          # ========================================================
           cat > www/dynamic-color-bridge.js << 'SCRIPT_EOF'
           (function () {
+
             function apply(palette) {
               if (!palette) return;
+
+              window.__dynamicColors = palette;
+
               Object.entries(palette).forEach(function (entry) {
-                document.documentElement.style.setProperty('--md-' + entry[0], entry[1]);
+                document.documentElement.style.setProperty(
+                  '--md-' + entry[0],
+                  entry[1]
+                );
               });
+
+              document.documentElement.classList.add(
+                'dynamic-colors-ready'
+              );
+
+              document.dispatchEvent(
+                new CustomEvent('dynamic-colors-ready', {
+                  detail: palette
+                })
+              );
             }
 
-            document.addEventListener('dynamic-colors-ready', function (e) {
-              apply(e.detail);
-            });
+            function loadDynamicColors() {
 
-            if (window.__dynamicColors) {
-              apply(window.__dynamicColors);
+              if (
+                window.DynamicColorBridge &&
+                typeof window.DynamicColorBridge.getPalette === 'function'
+              ) {
+
+                try {
+
+                  var json =
+                    window.DynamicColorBridge.getPalette();
+
+                  if (json) {
+                    apply(JSON.parse(json));
+                    return true;
+                  }
+
+                } catch (error) {
+
+                  console.error(
+                    'Dynamic color bridge failed:',
+                    error
+                  );
+                }
+              }
+
+              return false;
             }
+
+            if (!loadDynamicColors()) {
+
+              var attempts = 0;
+
+              var timer = setInterval(function () {
+
+                attempts++;
+
+                if (
+                  loadDynamicColors() ||
+                  attempts >= 100
+                ) {
+                  clearInterval(timer);
+                }
+
+              }, 20);
+            }
+
           })();
           SCRIPT_EOF
 
+          # ========================================================
+          # INJECT DYNAMIC COLOR BRIDGE INTO HEAD
+          # ========================================================
           if [ -f www/index.html ]; then
-            sed -i \
-              's#</body>#<script src="dynamic-color-bridge.js"></script></body>#' \
-              www/index.html
-          fi
 
+            sed -i \
+              's#</head>#<script src="dynamic-color-bridge.js"></script></head>#' \
+              www/index.html
+
+          else
+            echo "ERROR: index.html not found."
+            exit 1
+          fi
 
       # ============================================================
       # STORAGE PERMISSION
@@ -447,24 +555,12 @@ jobs:
             '/<manifest /a\    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />' \
             android/app/src/main/AndroidManifest.xml
 
-
       # ============================================================
       # PREPARE APP ICON
-      #
-      # YOU PROVIDE:
-      #
-      #     logo.png
-      #
-      # Recommended:
-      #     2048x2048 or 4096x4096
-      #
-      # The workflow does NOT resize, crop, trim, recolor,
-      # or otherwise modify your logo.
-      #
-      # It simply gives the exact PNG to Capacitor Assets.
       # ============================================================
       - name: Prepare app icon
         run: |
+
           if [ ! -f logo.png ]; then
             echo "ERROR: logo.png was not found in repository root."
             echo ""
@@ -483,7 +579,6 @@ jobs:
 
           file assets-icon/logo.png
 
-
       # ============================================================
       # INSTALL CAPACITOR ASSETS
       # ============================================================
@@ -491,18 +586,8 @@ jobs:
         run: |
           npm install --save-dev @capacitor/assets
 
-
       # ============================================================
       # GENERATE ANDROID ICONS
-      #
-      # Capacitor Assets Easy Mode:
-      #
-      #     logo.png
-      #        ↓
-      #     Android launcher resources
-      #
-      # We provide explicit background colors so Capacitor can
-      # generate the adaptive icon background consistently.
       # ============================================================
       - name: Generate Android icons
         run: |
@@ -512,14 +597,12 @@ jobs:
             --iconBackgroundColor "#FFFFFF" \
             --iconBackgroundColorDark "#111111"
 
-
       # ============================================================
       # SYNC CAPACITOR
       # ============================================================
       - name: Sync Android project
         run: |
           npx cap sync android
-
 
       # ============================================================
       # JAVA 17
@@ -529,7 +612,6 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-
 
       # ============================================================
       # BUILD DEBUG APK
@@ -541,7 +623,6 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug
 
-
       # ============================================================
       # BUILD RELEASE APK
       # ============================================================
@@ -551,7 +632,6 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease
-
 
       # ============================================================
       # UPLOAD APK

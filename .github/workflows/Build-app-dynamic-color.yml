@@ -153,14 +153,21 @@ jobs:
 
 
       # ============================================================
-      # DYNAMIC COLOR + EDGE-TO-EDGE
+      # DYNAMIC COLOR
       # Material You / Android 12+
+      #
+      # IMPORTANT:
+      # Dynamic colors are NOT applied to the Activity.
+      #
+      # The original Capacitor Activity theme remains untouched.
+      # Dynamic Material 3 colors are resolved using a separate
+      # Context only for palette extraction.
       # ============================================================
       - name: Inject dynamic color bridge
         run: |
 
           # --------------------------------------------------------
-          # 1. Add Material Components + AndroidX Core
+          # 1. Add Material Components dependency
           # --------------------------------------------------------
           GRADLE_FILE=android/app/build.gradle
 
@@ -169,8 +176,6 @@ jobs:
             exit 1
           fi
 
-
-          # Material Components
           if ! grep -q "com.google.android.material:material" "$GRADLE_FILE"; then
             sed -i \
               "s#implementation project(':capacitor-android')#implementation project(':capacitor-android')\n    implementation 'com.google.android.material:material:1.12.0'#" \
@@ -182,60 +187,42 @@ jobs:
           fi
 
 
-          # AndroidX Core 1.13.1
+          # --------------------------------------------------------
+          # 2. DO NOT MODIFY styles.xml
           #
-          # 1.16.0 requires AGP 8.6+ / compileSdk 35+.
-          # This project currently uses AGP 8.2.1 / compileSdk 34,
-          # so keep Core at 1.13.1.
-          if ! grep -q "androidx.core:core:" "$GRADLE_FILE"; then
-            sed -i \
-              "s#implementation project(':capacitor-android')#implementation project(':capacitor-android')\n    implementation 'androidx.core:core:1.13.1'#" \
-              "$GRADLE_FILE"
-
-            echo "Added AndroidX Core 1.13.1."
-          else
-            echo "AndroidX Core dependency already present."
-          fi
-
-
-          echo "=========================================="
-          echo "Relevant Gradle dependencies:"
-          echo "=========================================="
-
-          grep -E \
-            "capacitor-android|material:|androidx.core:core:" \
-            "$GRADLE_FILE" || true
-
-
+          # The original Capacitor theme is intentionally preserved.
+          #
+          # Previously this workflow changed the Activity theme to:
+          #
+          # Theme.Material3.DynamicColors.DayNight.NoActionBar
+          #
+          # That caused Material Dynamic Colors to affect the
+          # Activity/system bars.
+          #
+          # We now leave styles.xml completely untouched.
           # --------------------------------------------------------
-          # 2. Set Material 3 Dynamic Colors theme
-          # --------------------------------------------------------
-          STYLES=android/app/src/main/res/values/styles.xml
-
-          if [ -f "$STYLES" ]; then
-            sed -i \
-              's#parent="Theme\.AppCompat[^"]*"#parent="Theme.Material3.DynamicColors.DayNight.NoActionBar"#' \
-              "$STYLES"
-
-            echo "Patched Material 3 theme:"
-            cat "$STYLES"
-          else
-            echo "WARNING: styles.xml not found."
-          fi
+          echo "=========================================="
+          echo "Keeping original Capacitor Activity theme"
+          echo "styles.xml will NOT be modified."
+          echo "=========================================="
 
 
           # --------------------------------------------------------
           # 3. Patch MainActivity.java
           #
           # IMPORTANT:
-          # The WebView still PULLS the palette from Android.
-          # The dynamic-color bridge itself is unchanged.
           #
-          # Edge-to-edge:
-          # - WebView can draw behind system bars
-          # - Status bar is transparent
-          # - Navigation bar is transparent
-          # - Navigation contrast enforcement is disabled
+          # DynamicColors.applyToActivityIfAvailable(this)
+          # is intentionally NOT used.
+          #
+          # Instead, a separate Material 3 Context is created only
+          # for resolving the dynamic Material palette.
+          #
+          # Therefore:
+          #
+          # Activity theme      -> Capacitor original theme
+          # System bars         -> Capacitor original colors
+          # Web palette         -> Android Material You colors
           # --------------------------------------------------------
           MAIN_ACTIVITY=$(find android/app/src/main/java -name "MainActivity.java" | head -n 1)
 
@@ -249,13 +236,11 @@ jobs:
           cat > "$MAIN_ACTIVITY" << JAVA_EOF
           $PACKAGE_LINE
 
-          import android.graphics.Color;
+          import android.content.Context;
           import android.os.Bundle;
-          import android.view.Window;
+          import android.view.ContextThemeWrapper;
           import android.webkit.JavascriptInterface;
           import android.webkit.WebView;
-
-          import androidx.core.view.WindowCompat;
 
           import com.getcapacitor.BridgeActivity;
           import com.google.android.material.color.DynamicColors;
@@ -264,38 +249,58 @@ jobs:
 
           public class MainActivity extends BridgeActivity {
 
+              /*
+               * This Context is used ONLY to resolve the Material You
+               * palette.
+               *
+               * It is NOT the Activity context and therefore does
+               * not modify the Activity's window/system-bar colors.
+               */
+              private Context dynamicColorContext;
+
+
               @Override
               public void onCreate(Bundle savedInstanceState) {
 
-                  // Apply Android 12+ Material You colors
-                  // before normal Activity theme inflation.
-                  DynamicColors.applyToActivityIfAvailable(this);
+                  /*
+                   * IMPORTANT:
+                   *
+                   * Do NOT call:
+                   *
+                   * DynamicColors.applyToActivityIfAvailable(this);
+                   *
+                   * That modifies the Activity theme and can cause
+                   * dynamic colors to propagate to system bars.
+                   */
 
                   super.onCreate(savedInstanceState);
 
-                  // ==================================================
-                  // EDGE-TO-EDGE
-                  // ==================================================
-                  Window window = getWindow();
 
-                  WindowCompat.setDecorFitsSystemWindows(window, false);
+                  /*
+                   * Create an isolated Material 3 theme context.
+                   *
+                   * This gives MaterialColors access to the Material 3
+                   * color attributes without changing the Activity theme.
+                   */
+                  Context materialContext =
+                      new ContextThemeWrapper(
+                          this,
+                          R.style.Theme_Material3_DayNight_NoActionBar
+                      );
 
-                  if (android.os.Build.VERSION.SDK_INT >= 21) {
-                      window.setStatusBarColor(Color.TRANSPARENT);
-                      window.setNavigationBarColor(Color.TRANSPARENT);
-                  }
+                  /*
+                   * Apply Android 12+ dynamic colors ONLY to this
+                   * temporary palette context.
+                   */
+                  dynamicColorContext =
+                      DynamicColors.wrapContextIfAvailable(
+                          materialContext
+                      );
 
-                  if (android.os.Build.VERSION.SDK_INT >= 29) {
-                      window.setNavigationBarContrastEnforced(false);
-                  }
 
-
-                  // ==================================================
-                  // DYNAMIC COLOR JAVASCRIPT BRIDGE
-                  // ==================================================
-                  // The WebView pulls the palette directly from
-                  // Android. This removes the startup race caused
-                  // by evaluateJavascript().
+                  /*
+                   * Expose the resolved Material palette to JavaScript.
+                   */
                   WebView webView = bridge.getWebView();
 
                   webView.addJavascriptInterface(
@@ -303,6 +308,7 @@ jobs:
                       "DynamicColorBridge"
                   );
               }
+
 
               private class DynamicColorJavascriptInterface {
 
@@ -312,13 +318,29 @@ jobs:
                   }
               }
 
+
+              /*
+               * Resolve colors from the isolated dynamic Material
+               * context rather than the Activity.
+               */
               private int resolveColor(int attr, int fallback) {
-                  return MaterialColors.getColor(this, attr, fallback);
+
+                  return MaterialColors.getColor(
+                      dynamicColorContext,
+                      attr,
+                      fallback
+                  );
               }
 
+
               private String hex(int color) {
-                  return String.format("#%06X", 0xFFFFFF & color);
+
+                  return String.format(
+                      "#%06X",
+                      0xFFFFFF & color
+                  );
               }
+
 
               private String buildPaletteJson() {
 
@@ -350,10 +372,10 @@ jobs:
                       { R.attr.colorOnSurfaceVariant,        0 },
 
                       { R.attr.colorSurfaceContainerLowest,   0 },
-                      { R.attr.colorSurfaceContainerLow,       0 },
-                      { R.attr.colorSurfaceContainer,          0 },
-                      { R.attr.colorSurfaceContainerHigh,     0 },
-                      { R.attr.colorSurfaceContainerHighest,  0 },
+                      { R.attr.colorSurfaceContainerLow,     0 },
+                      { R.attr.colorSurfaceContainer,         0 },
+                      { R.attr.colorSurfaceContainerHigh,    0 },
+                      { R.attr.colorSurfaceContainerHighest, 0 },
 
                       { R.attr.colorSurfaceDim,               0 },
                       { R.attr.colorSurfaceBright,            0 },
@@ -361,6 +383,7 @@ jobs:
                       { R.attr.colorOutline,                  0 },
                       { R.attr.colorOutlineVariant,           0 }
                   };
+
 
                   String[] keys = {
 
@@ -402,7 +425,10 @@ jobs:
                       "outlineVariant"
                   };
 
-                  StringBuilder sb = new StringBuilder("{");
+
+                  StringBuilder sb =
+                      new StringBuilder("{");
+
 
                   for (int i = 0; i < palette.length; i++) {
 
@@ -411,16 +437,19 @@ jobs:
                           0xFF6750A4
                       );
 
+
                       sb.append("\"")
                         .append(keys[i])
                         .append("\":\"")
                         .append(hex(color))
                         .append("\"");
 
+
                       if (i < palette.length - 1) {
                           sb.append(",");
                       }
                   }
+
 
                   sb.append("}");
 
@@ -429,9 +458,11 @@ jobs:
           }
           JAVA_EOF
 
+
           echo "=========================================="
           echo "MainActivity.java patched"
           echo "=========================================="
+
           cat "$MAIN_ACTIVITY"
 
 

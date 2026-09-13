@@ -179,7 +179,6 @@ jobs:
             echo "Material Components dependency already present."
           fi
 
-
           # --------------------------------------------------------
           # 2. Set Material 3 Dynamic Colors theme
           # --------------------------------------------------------
@@ -192,19 +191,30 @@ jobs:
 
             # Use Material You surface container lowest for
             # Android status/notification and navigation bars.
-            sed -i \
-              '/<\\/resources>/i\
-              <item name="android:statusBarColor">?attr/colorSurfaceContainerLowest</item>\
-              <item name="android:navigationBarColor">?attr/colorSurfaceContainerLowest</item>' \
-              "$STYLES"
+            python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("android/app/src/main/res/values/styles.xml")
+          text = path.read_text()
+
+          insertion = """    <item name="android:statusBarColor">?attr/colorSurfaceContainerLowest</item>
+              <item name="android:navigationBarColor">?attr/colorSurfaceContainerLowest</item>
+          """
+
+          text = text.replace(
+              "</resources>",
+              insertion + "</resources>"
+          )
+
+          path.write_text(text)
+          PY
 
             echo "Patched Material 3 theme:"
             cat "$STYLES"
           else
             echo "WARNING: styles.xml not found."
           fi
-
-
+          
           # --------------------------------------------------------
           # 3. Patch MainActivity.java
           #

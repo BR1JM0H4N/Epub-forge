@@ -176,7 +176,7 @@ jobs:
           # AndroidX Core for WindowCompat / Edge-to-Edge
           if ! grep -q "androidx.core:core:" "$GRADLE_FILE"; then
             sed -i \
-              "s#implementation project(':capacitor-android')#implementation project(':capacitor-android')\n    implementation 'androidx.core:core:1.16.0'#" \
+              "s#implementation project(':capacitor-android')#implementation project(':capacitor-android')\n    implementation 'androidx.core:core:1.13.1'#" \
               "$GRADLE_FILE"
 
             echo "Added AndroidX Core dependency."

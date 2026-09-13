@@ -184,16 +184,65 @@ jobs:
       # ============================================================
       # DYNAMIC COLOR (Material You / Android 12+)
       #
-      # Patches the generated MainActivity.java + styles.xml so the
-      # app reads the user's wallpaper-derived palette and pushes it
-      # into the WebView as window.__dynamicColors / CSS variables
-      # (--md-primary, --md-secondary) before your app code runs.
+      # 1. Adds the Material Components library dependency (not
+      #    present in Capacitor's default template).
+      # 2. Sets the app theme parent to a REAL Material3 style
+      #    (Theme.Material3.DayNight — NOT "...DynamicColors...",
+      #    which does not exist as a style name).
+      # 3. Calls DynamicColors.applyToActivityIfAvailable(this) in
+      #    MainActivity.java — this is the actual API that turns on
+      #    wallpaper-derived colors at runtime; it's a method call,
+      #    not a theme name.
+      # 4. Reads the resolved colorPrimary/colorSecondary theme
+      #    attributes and pushes them into the WebView as
+      #    window.__dynamicColors / CSS variables.
       #
       # Falls back harmlessly on API < 31 (colors just won't be
       # Material-You-derived, no crash).
       # ============================================================
       - name: Inject dynamic color bridge
         run: |
+          # --------------------------------------------------------
+          # 1. Add Material Components dependency to app/build.gradle
+          # --------------------------------------------------------
+          GRADLE_FILE=android/app/build.gradle
+
+          if [ ! -f "$GRADLE_FILE" ]; then
+            echo "ERROR: $GRADLE_FILE not found."
+            exit 1
+          fi
+
+          if ! grep -q "com.google.android.material:material" "$GRADLE_FILE"; then
+            sed -i \
+              "s#implementation project(':capacitor-android')#implementation project(':capacitor-android')\n    implementation 'com.google.android.material:material:1.12.0'#" \
+              "$GRADLE_FILE"
+            echo "Added Material Components dependency to $GRADLE_FILE"
+          else
+            echo "Material Components dependency already present, skipping."
+          fi
+
+          cat "$GRADLE_FILE"
+
+
+          # --------------------------------------------------------
+          # 2. Set theme parent to a real Material3 style
+          # --------------------------------------------------------
+          STYLES=android/app/src/main/res/values/styles.xml
+
+          if [ -f "$STYLES" ]; then
+            sed -i \
+              's#parent="Theme\.AppCompat[^"]*"#parent="Theme.Material3.DayNight.NoActionBar"#' \
+              "$STYLES"
+            echo "Patched theme parent in $STYLES"
+            cat "$STYLES"
+          else
+            echo "WARNING: styles.xml not found at expected path, skipping theme patch."
+          fi
+
+
+          # --------------------------------------------------------
+          # 3 & 4. Patch MainActivity.java
+          # --------------------------------------------------------
           MAIN_ACTIVITY=$(find android/app/src/main/java -name "MainActivity.java")
 
           if [ -z "$MAIN_ACTIVITY" ]; then
@@ -211,10 +260,14 @@ jobs:
           import android.os.Bundle;
           import android.util.TypedValue;
           import com.getcapacitor.BridgeActivity;
+          import com.google.android.material.color.DynamicColors;
 
           public class MainActivity extends BridgeActivity {
               @Override
               public void onCreate(Bundle savedInstanceState) {
+                  // Must run before super.onCreate() applies the theme.
+                  DynamicColors.applyToActivityIfAvailable(this);
+
                   super.onCreate(savedInstanceState);
 
                   bridge.getWebView().post(() -> {
@@ -251,22 +304,6 @@ jobs:
           echo "MainActivity.java patched:"
           echo "=========================================="
           cat "$MAIN_ACTIVITY"
-
-
-          # --------------------------------------------------------
-          # Enable Material3 DynamicColors theme
-          # --------------------------------------------------------
-          STYLES=android/app/src/main/res/values/styles.xml
-
-          if [ -f "$STYLES" ]; then
-            sed -i \
-              's#parent="Theme\.AppCompat[^"]*"#parent="Theme.Material3.DynamicColors.DayNight"#' \
-              "$STYLES"
-            echo "Patched theme parent in $STYLES"
-            cat "$STYLES"
-          else
-            echo "WARNING: styles.xml not found at expected path, skipping theme patch."
-          fi
 
 
           # --------------------------------------------------------

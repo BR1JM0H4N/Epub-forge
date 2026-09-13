@@ -182,6 +182,123 @@ jobs:
 
 
       # ============================================================
+      # DYNAMIC COLOR (Material You / Android 12+)
+      #
+      # Patches the generated MainActivity.java + styles.xml so the
+      # app reads the user's wallpaper-derived palette and pushes it
+      # into the WebView as window.__dynamicColors / CSS variables
+      # (--md-primary, --md-secondary) before your app code runs.
+      #
+      # Falls back harmlessly on API < 31 (colors just won't be
+      # Material-You-derived, no crash).
+      # ============================================================
+      - name: Inject dynamic color bridge
+        run: |
+          MAIN_ACTIVITY=$(find android/app/src/main/java -name "MainActivity.java")
+
+          if [ -z "$MAIN_ACTIVITY" ]; then
+            echo "ERROR: MainActivity.java not found."
+            exit 1
+          fi
+
+          echo "Patching $MAIN_ACTIVITY"
+
+          PACKAGE_LINE=$(grep '^package ' "$MAIN_ACTIVITY")
+
+          cat > "$MAIN_ACTIVITY" << JAVA_EOF
+          $PACKAGE_LINE
+
+          import android.os.Bundle;
+          import android.util.TypedValue;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  bridge.getWebView().post(() -> {
+                      String js = "window.__dynamicColors = " + buildPaletteJson() + ";"
+                          + "document.dispatchEvent(new CustomEvent('dynamic-colors-ready',"
+                          + "{ detail: window.__dynamicColors }));";
+                      bridge.getWebView().evaluateJavascript(js, null);
+                  });
+              }
+
+              private String buildPaletteJson() {
+                  int[] attrs = {
+                      android.R.attr.colorPrimary,
+                      android.R.attr.colorSecondary
+                  };
+                  String[] keys = { "primary", "secondary" };
+
+                  StringBuilder sb = new StringBuilder("{");
+                  TypedValue tv = new TypedValue();
+
+                  for (int i = 0; i < attrs.length; i++) {
+                      getTheme().resolveAttribute(attrs[i], tv, true);
+                      String hex = String.format("#%06X", 0xFFFFFF & tv.data);
+                      sb.append("\"").append(keys[i]).append("\":\"").append(hex).append("\"");
+                      if (i < attrs.length - 1) sb.append(",");
+                  }
+                  sb.append("}");
+                  return sb.toString();
+              }
+          }
+          JAVA_EOF
+
+          echo "=========================================="
+          echo "MainActivity.java patched:"
+          echo "=========================================="
+          cat "$MAIN_ACTIVITY"
+
+
+          # --------------------------------------------------------
+          # Enable Material3 DynamicColors theme
+          # --------------------------------------------------------
+          STYLES=android/app/src/main/res/values/styles.xml
+
+          if [ -f "$STYLES" ]; then
+            sed -i \
+              's#parent="Theme\.AppCompat[^"]*"#parent="Theme.Material3.DynamicColors.DayNight"#' \
+              "$STYLES"
+            echo "Patched theme parent in $STYLES"
+            cat "$STYLES"
+          else
+            echo "WARNING: styles.xml not found at expected path, skipping theme patch."
+          fi
+
+
+          # --------------------------------------------------------
+          # JS listener injected into www/ (already prepared earlier)
+          # --------------------------------------------------------
+          cat > www/dynamic-color-bridge.js << 'SCRIPT_EOF'
+          (function () {
+            function apply(palette) {
+              if (!palette) return;
+              Object.entries(palette).forEach(function (entry) {
+                document.documentElement.style.setProperty('--md-' + entry[0], entry[1]);
+              });
+            }
+
+            document.addEventListener('dynamic-colors-ready', function (e) {
+              apply(e.detail);
+            });
+
+            if (window.__dynamicColors) {
+              apply(window.__dynamicColors);
+            }
+          })();
+          SCRIPT_EOF
+
+          if [ -f www/index.html ]; then
+            sed -i \
+              's#</body>#<script src="dynamic-color-bridge.js"></script></body>#' \
+              www/index.html
+          fi
+
+
+      # ============================================================
       # STORAGE PERMISSION
       # ============================================================
       - name: Add storage permission

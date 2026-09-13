@@ -179,31 +179,68 @@ jobs:
             echo "Material Components dependency already present."
           fi
 
-          # --------------------------------------------------------
-          # 2. Set Material 3 Dynamic Colors theme
-          # --------------------------------------------------------
+             # ============================================================
+      # 2. Set Material 3 Dynamic Colors theme
+      # ============================================================
+      - name: Inject dynamic color bridge
+        shell: bash
+        run: |
+          set -e
+
+          GRADLE=android/app/build.gradle
           STYLES=android/app/src/main/res/values/styles.xml
 
+          # --------------------------------------------------------
+          # Add Material Components
+          # --------------------------------------------------------
+          if ! grep -q "com.google.android.material:material" "$GRADLE"; then
+            sed -i "/dependencies[[:space:]]*{/a\\    implementation 'com.google.android.material:material:1.12.0'" "$GRADLE"
+          fi
+
+          # --------------------------------------------------------
+          # Patch Material 3 theme + system bar colors
+          # --------------------------------------------------------
           if [ -f "$STYLES" ]; then
+
+            # Change the existing AppCompat parent to Material 3 Dynamic
             sed -i \
               's#parent="Theme\.AppCompat[^"]*"#parent="Theme.Material3.DynamicColors.DayNight.NoActionBar"#' \
               "$STYLES"
 
-            # Use Material You surface container lowest for
-            # Android status/notification and navigation bars.
             python3 - <<'PY'
           from pathlib import Path
 
           path = Path("android/app/src/main/res/values/styles.xml")
           text = path.read_text()
 
-          insertion = """    <item name="android:statusBarColor">?attr/colorSurfaceContainerLowest</item>
-              <item name="android:navigationBarColor">?attr/colorSurfaceContainerLowest</item>
+          # Remove any previously injected system-bar items.
+          import re
+
+          text = re.sub(
+              r'\s*<item name="android:statusBarColor">.*?</item>',
+              '',
+              text
+          )
+
+          text = re.sub(
+              r'\s*<item name="android:navigationBarColor">.*?</item>',
+              '',
+              text
+          )
+
+          # These MUST be inside the <style> element.
+          items = """
+                  <item name="android:statusBarColor">?attr/colorSurfaceContainerLowest</item>
+                  <item name="android:navigationBarColor">?attr/colorSurfaceContainerLowest</item>
           """
 
+          if "</style>" not in text:
+              raise SystemExit("ERROR: </style> not found in styles.xml")
+
           text = text.replace(
-              "</resources>",
-              insertion + "</resources>"
+              "</style>",
+              items + "\n    </style>",
+              1
           )
 
           path.write_text(text)
@@ -211,6 +248,7 @@ jobs:
 
             echo "Patched Material 3 theme:"
             cat "$STYLES"
+
           else
             echo "WARNING: styles.xml not found."
           fi

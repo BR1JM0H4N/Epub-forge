@@ -1,4 +1,4 @@
-name: Build APK
+name: Build APK v4
 
 on:
   workflow_dispatch:
@@ -215,6 +215,16 @@ jobs:
             cat "$STYLES"
           fi
 
+          
+          echo "=========================================="
+          echo "DEBUG: Full styles.xml content"
+          echo "=========================================="
+          cat -A android/app/src/main/res/values/styles.xml | head -50
+
+          echo "=========================================="
+          echo "DEBUG: Activity theme in AndroidManifest.xml"
+          echo "=========================================="
+          grep -A 2 "<activity" android/app/src/main/AndroidManifest.xml
 
           # --------------------------------------------------------
           # 3. Patch MainActivity.java

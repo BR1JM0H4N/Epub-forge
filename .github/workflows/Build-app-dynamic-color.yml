@@ -31,7 +31,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
 
       # ============================================================
@@ -632,13 +632,13 @@ jobs:
 
 
       # ============================================================
-      # JAVA 17
+      # JAVA 21
       # ============================================================
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
 
 
       # ============================================================

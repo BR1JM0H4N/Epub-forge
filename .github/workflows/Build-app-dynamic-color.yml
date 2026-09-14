@@ -568,7 +568,17 @@ jobs:
           fi
 
 
-         # ============================================================
+      # ============================================================
+      # STORAGE PERMISSION
+      # ============================================================
+      - name: Add storage permission
+        run: |
+          sed -i \
+            '/<manifest /a\    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />' \
+            android/app/src/main/AndroidManifest.xml
+
+
+      # ============================================================
       # PREPARE APP ICON
       # ============================================================
       - name: Prepare app icon

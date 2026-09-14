@@ -558,9 +558,9 @@ jobs:
           # --------------------------------------------------------
           if [ -f www/index.html ]; then
 
-            sed -i \
-              's#</head>#<script src="dynamic-color-bridge.js"></script></head>#' \
-              www/index.html
+          sed -i \
+          's#</head>#<script src="capacitor-download-bridge.js"></script><script src="dynamic-color-bridge.js"></script></head>#' \
+                www/index.html
 
           else
             echo "ERROR: index.html not found."

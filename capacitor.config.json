@@ -12,15 +12,6 @@
       "backgroundColor": "#ffffffff",
       "androidSplashResourceName": "splash",
       "showSpinner": false
-    },
-    "SystemBars": {
-      "insetsHandling": "css",
-      "style": "DEFAULT",
-      "hidden": false,
-      "animation": "NONE"
     }
-  },
-  "android": {
-    "adjustMarginsForEdgeToEdge": "disable"
   }
 }

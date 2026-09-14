@@ -155,13 +155,6 @@ jobs:
       # ============================================================
       # DYNAMIC COLOR
       # Material You / Android 12+
-      #
-      # IMPORTANT:
-      # Dynamic colors are NOT applied to the Activity.
-      #
-      # The original Capacitor Activity theme remains untouched.
-      # Dynamic Material 3 colors are resolved using a separate
-      # Context only for palette extraction.
       # ============================================================
       - name: Inject dynamic color bridge
         run: |
@@ -188,41 +181,7 @@ jobs:
 
 
           # --------------------------------------------------------
-          # 2. DO NOT MODIFY styles.xml
-          #
-          # The original Capacitor theme is intentionally preserved.
-          #
-          # Previously this workflow changed the Activity theme to:
-          #
-          # Theme.Material3.DynamicColors.DayNight.NoActionBar
-          #
-          # That caused Material Dynamic Colors to affect the
-          # Activity/system bars.
-          #
-          # We now leave styles.xml completely untouched.
-          # --------------------------------------------------------
-          echo "=========================================="
-          echo "Keeping original Capacitor Activity theme"
-          echo "styles.xml will NOT be modified."
-          echo "=========================================="
-
-
-          # --------------------------------------------------------
           # 3. Patch MainActivity.java
-          #
-          # IMPORTANT:
-          #
-          # DynamicColors.applyToActivityIfAvailable(this)
-          # is intentionally NOT used.
-          #
-          # Instead, a separate Material 3 Context is created only
-          # for resolving the dynamic Material palette.
-          #
-          # Therefore:
-          #
-          # Activity theme      -> Capacitor original theme
-          # System bars         -> Capacitor original colors
-          # Web palette         -> Android Material You colors
           # --------------------------------------------------------
           MAIN_ACTIVITY=$(find android/app/src/main/java -name "MainActivity.java" | head -n 1)
 
@@ -248,40 +207,16 @@ jobs:
           import com.google.android.material.R;
 
           public class MainActivity extends BridgeActivity {
-
-              /*
-               * This Context is used ONLY to resolve the Material You
-               * palette.
-               *
-               * It is NOT the Activity context and therefore does
-               * not modify the Activity's window/system-bar colors.
-               */
               private Context dynamicColorContext;
 
 
               @Override
               public void onCreate(Bundle savedInstanceState) {
 
-                  /*
-                   * IMPORTANT:
-                   *
-                   * Do NOT call:
-                   *
-                   * DynamicColors.applyToActivityIfAvailable(this);
-                   *
-                   * That modifies the Activity theme and can cause
-                   * dynamic colors to propagate to system bars.
-                   */
+                DynamicColors.applyToActivityIfAvailable(this);
 
                   super.onCreate(savedInstanceState);
 
-
-                  /*
-                   * Create an isolated Material 3 theme context.
-                   *
-                   * This gives MaterialColors access to the Material 3
-                   * color attributes without changing the Activity theme.
-                   */
                   Context materialContext =
                       new ContextThemeWrapper(
                           this,

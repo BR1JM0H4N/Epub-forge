@@ -153,14 +153,14 @@ jobs:
 
 
       # ============================================================
-      # DYNAMIC COLOR
+      # DYNAMIC COLOR + EDGE-TO-EDGE
       # Material You / Android 12+
       # ============================================================
       - name: Inject dynamic color bridge
         run: |
 
           # --------------------------------------------------------
-          # 1. Add Material Components dependency
+          # 1. Add Material Components + AndroidX Core
           # --------------------------------------------------------
           GRADLE_FILE=android/app/build.gradle
 
@@ -169,6 +169,8 @@ jobs:
             exit 1
           fi
 
+
+          # Material Components
           if ! grep -q "com.google.android.material:material" "$GRADLE_FILE"; then
             sed -i \
               "s#implementation project(':capacitor-android')#implementation project(':capacitor-android')\n    implementation 'com.google.android.material:material:1.12.0'#" \
@@ -178,6 +180,31 @@ jobs:
           else
             echo "Material Components dependency already present."
           fi
+
+
+          # AndroidX Core 1.13.1
+          #
+          # 1.16.0 requires AGP 8.6+ / compileSdk 35+.
+          # This project currently uses AGP 8.2.1 / compileSdk 34,
+          # so keep Core at 1.13.1.
+          if ! grep -q "androidx.core:core:" "$GRADLE_FILE"; then
+            sed -i \
+              "s#implementation project(':capacitor-android')#implementation project(':capacitor-android')\n    implementation 'androidx.core:core:1.13.1'#" \
+              "$GRADLE_FILE"
+
+            echo "Added AndroidX Core 1.13.1."
+          else
+            echo "AndroidX Core dependency already present."
+          fi
+
+
+          echo "=========================================="
+          echo "Relevant Gradle dependencies:"
+          echo "=========================================="
+
+          grep -E \
+            "capacitor-android|material:|androidx.core:core:" \
+            "$GRADLE_FILE" || true
 
 
           # --------------------------------------------------------
@@ -201,12 +228,14 @@ jobs:
           # 3. Patch MainActivity.java
           #
           # IMPORTANT:
-          # The WebView now PULLS the palette from Android.
-          # This removes the startup race caused by evaluateJavascript().
+          # The WebView still PULLS the palette from Android.
+          # The dynamic-color bridge itself is unchanged.
           #
-          # The status bar and navigation bar backgrounds are
-          # forced to colorSurfaceContainerLowest (instead of the
-          # default colorPrimary the DynamicColors theme would use).
+          # Edge-to-edge:
+          # - WebView can draw behind system bars
+          # - Status bar is transparent
+          # - Navigation bar is transparent
+          # - Navigation contrast enforcement is disabled
           # --------------------------------------------------------
           MAIN_ACTIVITY=$(find android/app/src/main/java -name "MainActivity.java" | head -n 1)
 
@@ -220,10 +249,13 @@ jobs:
           cat > "$MAIN_ACTIVITY" << JAVA_EOF
           $PACKAGE_LINE
 
+          import android.graphics.Color;
           import android.os.Bundle;
           import android.view.Window;
           import android.webkit.JavascriptInterface;
           import android.webkit.WebView;
+
+          import androidx.core.view.WindowCompat;
 
           import com.getcapacitor.BridgeActivity;
           import com.google.android.material.color.DynamicColors;
@@ -241,29 +273,35 @@ jobs:
 
                   super.onCreate(savedInstanceState);
 
-                  // Force status bar + navigation bar background
-                  // to colorSurfaceContainerLowest, overriding
-                  // whatever the DynamicColors theme applied.
-                  applyBarColors();
+                  // ==================================================
+                  // EDGE-TO-EDGE
+                  // ==================================================
+                  Window window = getWindow();
 
-                  // Expose the resolved Material palette to JavaScript.
+                  WindowCompat.setDecorFitsSystemWindows(window, false);
+
+                  if (android.os.Build.VERSION.SDK_INT >= 21) {
+                      window.setStatusBarColor(Color.TRANSPARENT);
+                      window.setNavigationBarColor(Color.TRANSPARENT);
+                  }
+
+                  if (android.os.Build.VERSION.SDK_INT >= 29) {
+                      window.setNavigationBarContrastEnforced(false);
+                  }
+
+
+                  // ==================================================
+                  // DYNAMIC COLOR JAVASCRIPT BRIDGE
+                  // ==================================================
+                  // The WebView pulls the palette directly from
+                  // Android. This removes the startup race caused
+                  // by evaluateJavascript().
                   WebView webView = bridge.getWebView();
 
                   webView.addJavascriptInterface(
                       new DynamicColorJavascriptInterface(),
                       "DynamicColorBridge"
                   );
-              }
-
-              private void applyBarColors() {
-                  int surfaceContainerLowest = resolveColor(
-                      R.attr.colorSurfaceContainerLowest,
-                      0xFFFFFFFF
-                  );
-
-                  Window window = getWindow();
-                  window.setStatusBarColor(surfaceContainerLowest);
-                  window.setNavigationBarColor(surfaceContainerLowest);
               }
 
               private class DynamicColorJavascriptInterface {
